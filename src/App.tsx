@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import Contactos from "./components/Contactos";
 import Dashboard from "./components/Dashboard";
+import Deudas from "./components/Deudas";
 import Pagos from "./components/Pagos";
 import { isPreview, ping } from "./lib/api";
 import type { Section } from "./lib/types";
@@ -7,15 +9,16 @@ import type { Section } from "./lib/types";
 const NAV: { id: Section; label: string; fase?: string }[] = [
   { id: "dashboard", label: "Dashboard" },
   { id: "pagos", label: "Pagos" },
-  { id: "deudas", label: "Deudas", fase: "Fase 2" },
+  { id: "deudas", label: "Deudas" },
+  { id: "contactos", label: "Contactos" },
   { id: "recordatorios", label: "Recordatorios", fase: "Fase 3" },
-  { id: "contactos", label: "Contactos", fase: "Fase 2" },
   { id: "config", label: "Configuración", fase: "Fase 4" },
 ];
 
 export default function App() {
   const [section, setSection] = useState<Section>("dashboard");
   const [signalNuevo, setSignalNuevo] = useState(0);
+  const [signalDeuda, setSignalDeuda] = useState(0);
   const [bridge, setBridge] = useState<string | null>(null);
   const [bridgeMs, setBridgeMs] = useState<number | null>(null);
 
@@ -24,13 +27,18 @@ export default function App() {
     setSignalNuevo((s) => s + 1);
   }
 
+  function nuevaDeuda() {
+    setSection("deudas");
+    setSignalDeuda((s) => s + 1);
+  }
+
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       const k = e.key.toLowerCase();
       if (k === "n") nuevoPago();
-      else if (k === "d") setSection("deudas");
+      else if (k === "d") nuevaDeuda();
       else if (k === "r") setSection("recordatorios");
     };
     window.addEventListener("keydown", h);
@@ -112,7 +120,9 @@ export default function App() {
         )}
         {section === "dashboard" && <Dashboard onNuevoPago={nuevoPago} />}
         {section === "pagos" && <Pagos signalNuevo={signalNuevo} />}
-        {section !== "dashboard" && section !== "pagos" && (
+        {section === "deudas" && <Deudas signalNueva={signalDeuda} />}
+        {section === "contactos" && <Contactos />}
+        {(section === "recordatorios" || section === "config") && (
           <div className="flex h-full flex-col items-center justify-center text-center">
             <h2 className="text-2xl font-semibold capitalize tracking-tight">
               {NAV.find((n) => n.id === section)?.label}

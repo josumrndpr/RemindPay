@@ -1,8 +1,12 @@
 //! RemindPay — acceso SQLite.
 //! Funciones puras sobre `&Connection`: la app real usa el archivo data.db,
-//! los tests usan base en memoria. Sin `chrono`: fechas como TEXT ISO.
+//! los tests usan base en memoria. Sin `chrono`: fechas como TEXT ISO
+//! (el orden lexicográfico equivale al cronológico).
 
-use crate::models::{Category, MonthSummary, NewPayment, Payment, PaymentFilter};
+use crate::models::{
+    Category, Contact, Debt, DebtFilter, DebtPayment, DebtsSummary, EditDebt, MonthSummary,
+    NewContact, NewDebt, NewDebtPayment, NewPayment, Payment, PaymentFilter,
+};
 use rusqlite::{params, Connection, Row};
 
 const SCHEMA: &str = include_str!("../schema.sql");
@@ -15,48 +19,56 @@ const SEED_CATEGORIES: &[(&str, &str, &str)] = &[
     ("Transporte", "#3b82f6", "gasto"),
     ("Vivienda", "#8b5cf6", "gasto"),
     ("Salud", "#ef4444", "gasto"),
+    ("Suscripción", "#f43f5e", "gasto"),
     ("Entretenimiento", "#ec4899", "gasto"),
     ("Otros gastos", "#6b7280", "gasto"),
 ];
 
-/// Crea tablas + categorías iniciales. Idempotente.
+/// Crea tablas + categorías iniciales. Idempotente por nombre:
+/// agrega las que falten (ej. Suscripción en DBs creadas antes).
 pub fn init(conn: &Connection) -> Result<(), String> {
     conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")
         .map_err(|e| format!("pragmas: {e}"))?;
     conn.execute_batch(SCHEMA)
         .map_err(|e| format!("schema: {e}"))?;
-    let empty: &[&dyn rusqlite::ToSql] = &[];
-    let count: i64 = conn
-        .query_row("SELECT COUNT(*) FROM categories", empty, |r| r.get(0))
-        .map_err(|e| format!("count categories: {e}"))?;
-    if count == 0 {
-        for (nombre, color, tipo) in SEED_CATEGORIES {
-            conn.execute(
-                "INSERT INTO categories (nombre, color, tipo) VALUES (?1, ?2, ?3)",
-                params![nombre, color, tipo],
-            )
-            .map_err(|e| format!("seed: {e}"))?;
-        }
+    for (nombre, color, tipo) in SEED_CATEGORIES {
+        conn.execute(
+            "INSERT INTO categories (nombre, color, tipo) SELECT ?1, ?2, ?3 WHERE NOT EXISTS (SELECT 1 FROM categories WHERE nombre = ?1)",
+            params![nombre, color, tipo],
+        )
+        .map_err(|e| format!("seed: {e}"))?;
     }
     Ok(())
 }
+
+/// Dólares → centavos con validación compartida.
+fn to_cents(monto: f64) -> Result<i64, String> {
+    if !monto.is_finite() || monto <= 0.0 {
+        return Err("el monto debe ser mayor a 0".into());
+    }
+    if monto > 999_999_999.0 {
+        return Err("monto demasiado grande".into());
+    }
+    let cents = (monto * 100.0).round() as i64;
+    if cents <= 0 {
+        return Err("el monto debe ser mayor a 0".into());
+    }
+    Ok(cents)
+}
+
+fn fecha_valida(fecha: &str) -> bool {
+    fecha.len() == 10 && fecha.as_bytes()[4] == b'-'
+}
+
+// ── Pagos ────────────────────────────────────────────────────────────────
 
 /// Valida un pago y devuelve el monto en centavos USD.
 pub fn validate(input: &NewPayment) -> Result<i64, String> {
     if input.tipo != "ingreso" && input.tipo != "gasto" {
         return Err("tipo inválido".into());
     }
-    if !input.monto.is_finite() || input.monto <= 0.0 {
-        return Err("el monto debe ser mayor a 0".into());
-    }
-    if input.monto > 999_999_999.0 {
-        return Err("monto demasiado grande".into());
-    }
-    let cents = (input.monto * 100.0).round() as i64;
-    if cents <= 0 {
-        return Err("el monto debe ser mayor a 0".into());
-    }
-    if input.fecha.len() != 10 || input.fecha.as_bytes()[4] != b'-' {
+    let cents = to_cents(input.monto)?;
+    if !fecha_valida(&input.fecha) {
         return Err("fecha inválida (yyyy-MM-dd)".into());
     }
     if input.descripcion.trim().len() > 280 {
@@ -95,12 +107,13 @@ pub fn get_payment(conn: &Connection, id: i64) -> Result<Payment, String> {
 pub fn insert_payment(conn: &Connection, input: &NewPayment) -> Result<Payment, String> {
     let cents = validate(input)?;
     conn.execute(
-        "INSERT INTO payments (tipo, monto_cents, fecha, categoria_id, descripcion) VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO payments (tipo, monto_cents, fecha, categoria_id, contacto_id, descripcion) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             input.tipo,
             cents,
             input.fecha,
             input.categoria_id,
+            input.contacto_id,
             input.descripcion.trim()
         ],
     )
@@ -112,12 +125,13 @@ pub fn update_payment(conn: &Connection, id: i64, input: &NewPayment) -> Result<
     let cents = validate(input)?;
     let rows = conn
         .execute(
-            "UPDATE payments SET tipo = ?1, monto_cents = ?2, fecha = ?3, categoria_id = ?4, descripcion = ?5 WHERE id = ?6",
+            "UPDATE payments SET tipo = ?1, monto_cents = ?2, fecha = ?3, categoria_id = ?4, contacto_id = ?5, descripcion = ?6 WHERE id = ?7",
             params![
                 input.tipo,
                 cents,
                 input.fecha,
                 input.categoria_id,
+                input.contacto_id,
                 input.descripcion.trim(),
                 id
             ],
@@ -227,10 +241,363 @@ pub fn all_categories(conn: &Connection) -> Result<Vec<Category>, String> {
     Ok(out)
 }
 
+// ── Deudas ───────────────────────────────────────────────────────────────
+
+const DEBT_SELECT: &str = "SELECT d.id, d.direccion, d.persona, d.contacto_id, c.nombre, d.monto_total_cents, d.saldo_cents, d.fecha_limite, d.estado, d.notas, d.created_at FROM debts d LEFT JOIN contacts c ON c.id = d.contacto_id";
+
+fn row_to_debt(row: &Row) -> rusqlite::Result<Debt> {
+    Ok(Debt {
+        id: row.get(0)?,
+        direccion: row.get(1)?,
+        persona: row.get(2)?,
+        contacto_id: row.get(3)?,
+        contacto: row.get(4)?,
+        monto_total_cents: row.get(5)?,
+        saldo_cents: row.get(6)?,
+        fecha_limite: row.get(7)?,
+        estado: row.get(8)?,
+        notas: row.get(9)?,
+        created_at: row.get(10)?,
+    })
+}
+
+/// Deriva "vencida": activa con fecha límite pasada. No se persiste;
+/// `hoy` viene del frontend en yyyy-MM-dd.
+fn derivar(mut d: Debt, hoy: &str) -> Debt {
+    if d.estado == "activa" && !d.fecha_limite.is_empty() && d.fecha_limite.as_str() < hoy {
+        d.estado = "vencida".to_string();
+    }
+    d
+}
+
+fn validate_deuda_cuerpo(
+    persona: &str,
+    total: f64,
+    fecha_limite: &str,
+    notas: &str,
+) -> Result<(String, i64), String> {
+    let persona = persona.trim().to_string();
+    if persona.is_empty() {
+        return Err("falta la persona".into());
+    }
+    if persona.len() > 120 {
+        return Err("persona muy larga (máx 120)".into());
+    }
+    let cents = to_cents(total)?;
+    if !fecha_limite.is_empty() && !fecha_valida(fecha_limite) {
+        return Err("fecha límite inválida".into());
+    }
+    if notas.trim().len() > 500 {
+        return Err("notas muy largas (máx 500)".into());
+    }
+    Ok((persona, cents))
+}
+
+fn get_debt_row(conn: &Connection, id: i64) -> Result<Debt, String> {
+    conn.query_row(
+        &format!("{DEBT_SELECT} WHERE d.id = ?1"),
+        params![id],
+        row_to_debt,
+    )
+    .map_err(|e| format!("deuda no encontrada: {e}"))
+}
+
+pub fn get_debt(conn: &Connection, id: i64, hoy: &str) -> Result<Debt, String> {
+    get_debt_row(conn, id).map(|d| derivar(d, hoy))
+}
+
+pub fn insert_debt(conn: &Connection, input: &NewDebt, hoy: &str) -> Result<Debt, String> {
+    if input.direccion != "debo" && input.direccion != "me_deben" {
+        return Err("dirección inválida".into());
+    }
+    let (persona, total) = validate_deuda_cuerpo(
+        &input.persona,
+        input.monto_total,
+        &input.fecha_limite,
+        &input.notas,
+    )?;
+    conn.execute(
+        "INSERT INTO debts (direccion, persona, contacto_id, monto_total_cents, saldo_cents, fecha_limite, notas) VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6)",
+        params![
+            input.direccion,
+            persona,
+            input.contacto_id,
+            total,
+            input.fecha_limite,
+            input.notas.trim()
+        ],
+    )
+    .map_err(|e| format!("insert: {e}"))?;
+    get_debt(conn, conn.last_insert_rowid(), hoy)
+}
+
+pub fn update_debt(
+    conn: &Connection,
+    id: i64,
+    input: &EditDebt,
+    hoy: &str,
+) -> Result<Debt, String> {
+    let (persona, total) = validate_deuda_cuerpo(
+        &input.persona,
+        input.monto_total,
+        &input.fecha_limite,
+        &input.notas,
+    )?;
+    let cur = get_debt_row(conn, id)?;
+    if cur.estado == "saldada" && total != cur.monto_total_cents {
+        return Err("no se puede cambiar el total de una deuda saldada".into());
+    }
+    let saldo = (cur.saldo_cents + (total - cur.monto_total_cents)).max(0);
+    let rows = conn
+        .execute(
+            "UPDATE debts SET persona = ?1, contacto_id = ?2, monto_total_cents = ?3, saldo_cents = ?4, fecha_limite = ?5, notas = ?6 WHERE id = ?7",
+            params![
+                persona,
+                input.contacto_id,
+                total,
+                saldo,
+                input.fecha_limite,
+                input.notas.trim(),
+                id
+            ],
+        )
+        .map_err(|e| format!("update: {e}"))?;
+    if rows == 0 {
+        return Err("deuda no encontrada".into());
+    }
+    get_debt(conn, id, hoy)
+}
+
+pub fn delete_debt(conn: &Connection, id: i64) -> Result<(), String> {
+    let rows = conn
+        .execute("DELETE FROM debts WHERE id = ?1", params![id])
+        .map_err(|e| format!("delete: {e}"))?;
+    if rows == 0 {
+        return Err("deuda no encontrada".into());
+    }
+    Ok(())
+}
+
+pub fn query_debts(conn: &Connection, f: &DebtFilter, hoy: &str) -> Result<Vec<Debt>, String> {
+    let mut sql = String::from(DEBT_SELECT);
+    sql.push_str(" WHERE 1 = 1");
+    let mut args: Vec<String> = Vec::new();
+    if let Some(d) = &f.direccion {
+        if d == "debo" || d == "me_deben" {
+            sql.push_str(" AND d.direccion = ?");
+            args.push(d.clone());
+        }
+    }
+    if let Some(b) = &f.buscar {
+        let q = b.trim();
+        if !q.is_empty() {
+            sql.push_str(" AND (d.persona LIKE '%' || ? || '%' OR d.notas LIKE '%' || ? || '%')");
+            args.push(q.to_string());
+            args.push(q.to_string());
+        }
+    }
+    let mut stmt = conn.prepare(&sql).map_err(|e| format!("prepare: {e}"))?;
+    let refs: Vec<&dyn rusqlite::ToSql> = args.iter().map(|a| a as &dyn rusqlite::ToSql).collect();
+    let rows = stmt
+        .query_map(refs.as_slice(), row_to_debt)
+        .map_err(|e| format!("query: {e}"))?;
+    let mut out: Vec<Debt> = Vec::new();
+    for r in rows {
+        out.push(derivar(r.map_err(|e| format!("row: {e}"))?, hoy));
+    }
+    if let Some(e) = &f.estado {
+        if e == "activa" || e == "vencida" || e == "saldada" {
+            out.retain(|d| &d.estado == e);
+        }
+    }
+    out.sort_by(|a, b| {
+        let ra = if a.estado == "saldada" { 1 } else { 0 };
+        let rb = if b.estado == "saldada" { 1 } else { 0 };
+        (ra, &a.fecha_limite, a.id).cmp(&(rb, &b.fecha_limite, b.id))
+    });
+    out.truncate(f.limite.clamp(1, 2000) as usize);
+    Ok(out)
+}
+
+/// Registra un abono. Si supera el saldo, se limita al saldo y la deuda
+/// queda saldada automáticamente.
+pub fn add_debt_payment(
+    conn: &Connection,
+    debt_id: i64,
+    input: &NewDebtPayment,
+    hoy: &str,
+) -> Result<Debt, String> {
+    let cents = to_cents(input.monto)?;
+    if !fecha_valida(&input.fecha) {
+        return Err("fecha inválida (yyyy-MM-dd)".into());
+    }
+    if input.nota.trim().len() > 280 {
+        return Err("nota muy larga (máx 280)".into());
+    }
+    let cur = get_debt_row(conn, debt_id)?;
+    if cur.estado == "saldada" || cur.saldo_cents <= 0 {
+        return Err("la deuda ya está saldada".into());
+    }
+    let aplicado = cents.min(cur.saldo_cents);
+    conn.execute(
+        "INSERT INTO debt_payments (debt_id, monto_cents, fecha, nota) VALUES (?1, ?2, ?3, ?4)",
+        params![debt_id, aplicado, input.fecha, input.nota.trim()],
+    )
+    .map_err(|e| format!("insert: {e}"))?;
+    let saldo = cur.saldo_cents - aplicado;
+    let estado: &str = if saldo == 0 { "saldada" } else { &cur.estado };
+    conn.execute(
+        "UPDATE debts SET saldo_cents = ?1, estado = ?2 WHERE id = ?3",
+        params![saldo, estado, debt_id],
+    )
+    .map_err(|e| format!("update: {e}"))?;
+    get_debt(conn, debt_id, hoy)
+}
+
+pub fn list_debt_payments(conn: &Connection, debt_id: i64) -> Result<Vec<DebtPayment>, String> {
+    let mut stmt = conn
+        .prepare("SELECT id, debt_id, monto_cents, fecha, nota FROM debt_payments WHERE debt_id = ?1 ORDER BY fecha DESC, id DESC")
+        .map_err(|e| format!("prepare: {e}"))?;
+    let rows = stmt
+        .query_map(params![debt_id], |r| {
+            Ok(DebtPayment {
+                id: r.get(0)?,
+                debt_id: r.get(1)?,
+                monto_cents: r.get(2)?,
+                fecha: r.get(3)?,
+                nota: r.get(4)?,
+            })
+        })
+        .map_err(|e| format!("query: {e}"))?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(|e| format!("row: {e}"))?);
+    }
+    Ok(out)
+}
+
+pub fn debts_summary(conn: &Connection) -> Result<DebtsSummary, String> {
+    let empty: &[&dyn rusqlite::ToSql] = &[];
+    let (pagar, cobrar, activas): (i64, i64, i64) = conn
+        .query_row(
+            "SELECT COALESCE(SUM(CASE WHEN direccion = 'debo' AND estado <> 'saldada' THEN saldo_cents ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN direccion = 'me_deben' AND estado <> 'saldada' THEN saldo_cents ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN estado <> 'saldada' THEN 1 ELSE 0 END), 0)
+             FROM debts",
+            empty,
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .map_err(|e| format!("summary: {e}"))?;
+    Ok(DebtsSummary {
+        por_pagar_cents: pagar,
+        por_cobrar_cents: cobrar,
+        activas,
+    })
+}
+
+// ── Contactos ────────────────────────────────────────────────────────────
+
+fn row_to_contact(row: &Row) -> rusqlite::Result<Contact> {
+    Ok(Contact {
+        id: row.get(0)?,
+        nombre: row.get(1)?,
+        telefono: row.get(2)?,
+        nota: row.get(3)?,
+        created_at: row.get(4)?,
+    })
+}
+
+pub fn validate_contact(input: &NewContact) -> Result<String, String> {
+    let nombre = input.nombre.trim().to_string();
+    if nombre.is_empty() {
+        return Err("falta el nombre".into());
+    }
+    if nombre.len() > 120 {
+        return Err("nombre muy largo (máx 120)".into());
+    }
+    if input.telefono.trim().len() > 40 {
+        return Err("teléfono muy largo (máx 40)".into());
+    }
+    if input.nota.trim().len() > 500 {
+        return Err("nota muy larga (máx 500)".into());
+    }
+    Ok(nombre)
+}
+
+pub fn insert_contact(conn: &Connection, input: &NewContact) -> Result<Contact, String> {
+    let nombre = validate_contact(input)?;
+    conn.execute(
+        "INSERT INTO contacts (nombre, telefono, nota) VALUES (?1, ?2, ?3)",
+        params![nombre, input.telefono.trim(), input.nota.trim()],
+    )
+    .map_err(|e| format!("insert: {e}"))?;
+    conn.query_row(
+        "SELECT id, nombre, telefono, nota, created_at FROM contacts WHERE id = ?1",
+        params![conn.last_insert_rowid()],
+        row_to_contact,
+    )
+    .map_err(|e| format!("get: {e}"))
+}
+
+pub fn update_contact(conn: &Connection, id: i64, input: &NewContact) -> Result<Contact, String> {
+    let nombre = validate_contact(input)?;
+    let rows = conn
+        .execute(
+            "UPDATE contacts SET nombre = ?1, telefono = ?2, nota = ?3 WHERE id = ?4",
+            params![nombre, input.telefono.trim(), input.nota.trim(), id],
+        )
+        .map_err(|e| format!("update: {e}"))?;
+    if rows == 0 {
+        return Err("contacto no encontrado".into());
+    }
+    conn.query_row(
+        "SELECT id, nombre, telefono, nota, created_at FROM contacts WHERE id = ?1",
+        params![id],
+        row_to_contact,
+    )
+    .map_err(|e| format!("get: {e}"))
+}
+
+/// Borrar un contacto lo desvincula de pagos y deudas (FK SET NULL).
+pub fn delete_contact(conn: &Connection, id: i64) -> Result<(), String> {
+    let rows = conn
+        .execute("DELETE FROM contacts WHERE id = ?1", params![id])
+        .map_err(|e| format!("delete: {e}"))?;
+    if rows == 0 {
+        return Err("contacto no encontrado".into());
+    }
+    Ok(())
+}
+
+pub fn query_contacts(conn: &Connection, buscar: Option<String>) -> Result<Vec<Contact>, String> {
+    let mut sql =
+        String::from("SELECT id, nombre, telefono, nota, created_at FROM contacts WHERE 1 = 1");
+    let mut args: Vec<String> = Vec::new();
+    if let Some(b) = buscar {
+        let q = b.trim().to_string();
+        if !q.is_empty() {
+            sql.push_str(" AND (nombre LIKE '%' || ? || '%' OR telefono LIKE '%' || ? || '%')");
+            args.push(q.clone());
+            args.push(q);
+        }
+    }
+    sql.push_str(" ORDER BY nombre LIMIT 500");
+    let mut stmt = conn.prepare(&sql).map_err(|e| format!("prepare: {e}"))?;
+    let refs: Vec<&dyn rusqlite::ToSql> = args.iter().map(|a| a as &dyn rusqlite::ToSql).collect();
+    let rows = stmt
+        .query_map(refs.as_slice(), row_to_contact)
+        .map_err(|e| format!("query: {e}"))?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(|e| format!("row: {e}"))?);
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::NewPayment;
+    use crate::models::{NewDebt, NewDebtPayment, NewPayment};
 
     fn mem() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
@@ -244,7 +611,19 @@ mod tests {
             monto,
             fecha: fecha.into(),
             categoria_id: None,
+            contacto_id: None,
             descripcion: "prueba".into(),
+        }
+    }
+
+    fn debt_sample() -> NewDebt {
+        NewDebt {
+            direccion: "me_deben".into(),
+            persona: "Juan".into(),
+            contacto_id: None,
+            monto_total: 200.0,
+            fecha_limite: "2026-09-20".into(),
+            notas: "".into(),
         }
     }
 
@@ -252,7 +631,18 @@ mod tests {
     fn seed_crea_categorias() {
         let conn = mem();
         let cats = all_categories(&conn).unwrap();
-        assert_eq!(cats.len(), 9);
+        assert_eq!(cats.len(), 10);
+        assert!(cats.iter().any(|c| c.nombre == "Suscripción"));
+    }
+
+    #[test]
+    fn seed_idempotente_agrega_faltantes() {
+        let conn = mem();
+        conn.execute("DELETE FROM categories WHERE nombre = 'Suscripción'", [])
+            .unwrap();
+        init(&conn).unwrap();
+        let cats = all_categories(&conn).unwrap();
+        assert_eq!(cats.len(), 10);
     }
 
     #[test]
@@ -307,5 +697,76 @@ mod tests {
         assert!(insert_payment(&conn, &sample("gasto", 0.0, "2026-09-10")).is_err());
         assert!(insert_payment(&conn, &sample("otro", 5.0, "2026-09-10")).is_err());
         assert!(insert_payment(&conn, &sample("gasto", 5.0, "ayer")).is_err());
+    }
+
+    #[test]
+    fn deuda_abonos_y_saldo() {
+        let conn = mem();
+        let d = insert_debt(&conn, &debt_sample(), "2026-09-10").unwrap();
+        assert_eq!(d.saldo_cents, 20000);
+        assert_eq!(d.estado, "activa");
+        let abono = NewDebtPayment {
+            monto: 50.0,
+            fecha: "2026-09-11".into(),
+            nota: "".into(),
+        };
+        let d2 = add_debt_payment(&conn, d.id, &abono, "2026-09-11").unwrap();
+        assert_eq!(d2.saldo_cents, 15000);
+        assert_eq!(list_debt_payments(&conn, d.id).unwrap().len(), 1);
+        // Sobrepago: se limita al saldo y salda la deuda.
+        let grande = NewDebtPayment {
+            monto: 999.0,
+            fecha: "2026-09-12".into(),
+            nota: "".into(),
+        };
+        let d3 = add_debt_payment(&conn, d.id, &grande, "2026-09-12").unwrap();
+        assert_eq!(d3.saldo_cents, 0);
+        assert_eq!(d3.estado, "saldada");
+        assert!(add_debt_payment(&conn, d.id, &abono, "2026-09-13").is_err());
+    }
+
+    #[test]
+    fn deuda_vencida_derivada_y_resumen() {
+        let conn = mem();
+        let mut s = debt_sample();
+        s.fecha_limite = "2026-09-01".into();
+        let d = insert_debt(&conn, &s, "2026-09-10").unwrap();
+        assert_eq!(d.estado, "vencida");
+        let r = debts_summary(&conn).unwrap();
+        assert_eq!(r.por_cobrar_cents, 20000);
+        assert_eq!(r.por_pagar_cents, 0);
+        assert_eq!(r.activas, 1);
+    }
+
+    #[test]
+    fn contacto_desvincula_al_borrar() {
+        let conn = mem();
+        let c = insert_contact(
+            &conn,
+            &NewContact {
+                nombre: "Juan".into(),
+                telefono: "787".into(),
+                nota: "".into(),
+            },
+        )
+        .unwrap();
+        let mut s = debt_sample();
+        s.contacto_id = Some(c.id);
+        let d = insert_debt(&conn, &s, "2026-09-10").unwrap();
+        assert_eq!(d.contacto.as_deref(), Some("Juan"));
+        delete_contact(&conn, c.id).unwrap();
+        let d2 = get_debt(&conn, d.id, "2026-09-10").unwrap();
+        assert_eq!(d2.contacto_id, None);
+    }
+
+    #[test]
+    fn deuda_rechaza_basura() {
+        let conn = mem();
+        let mut s = debt_sample();
+        s.persona = "  ".into();
+        assert!(insert_debt(&conn, &s, "2026-09-10").is_err());
+        s.persona = "Juan".into();
+        s.monto_total = 0.0;
+        assert!(insert_debt(&conn, &s, "2026-09-10").is_err());
     }
 }

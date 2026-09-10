@@ -45,6 +45,17 @@ pub fn run() {
             commands::delete_payment,
             commands::payments_summary,
             commands::list_categories,
+            commands::list_debts,
+            commands::create_debt,
+            commands::update_debt,
+            commands::delete_debt,
+            commands::add_debt_payment,
+            commands::list_debt_payments,
+            commands::debts_summary,
+            commands::list_contacts,
+            commands::create_contact,
+            commands::update_contact,
+            commands::delete_contact,
         ])
         .run(tauri::generate_context!())
         .expect("error while running RemindPay");

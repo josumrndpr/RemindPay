@@ -1,10 +1,19 @@
 // RemindPay — wrappers tipados de comandos Tauri (Rust).
 // En navegador (sin runtime Tauri) usan el mock local para vista previa.
 import { invoke } from "@tauri-apps/api/core";
+import { todayLocal } from "./format";
 import * as mock from "./mock";
 import type {
   Category,
+  Contact,
+  Debt,
+  DebtPayment,
+  DebtsSummary,
+  EditDebtInput,
   MonthSummary,
+  NewContactInput,
+  NewDebtInput,
+  NewDebtPaymentInput,
   NewPaymentInput,
   Payment,
 } from "./types";
@@ -19,6 +28,8 @@ export function ping(msg: string): Promise<string> {
   if (isPreview()) return Promise.resolve(`pong (vista previa): ${msg}`);
   return invoke<string>("ping", { msg });
 }
+
+// ── Pagos ──
 
 export function listPayments(f: {
   tipo?: string;
@@ -61,4 +72,84 @@ export function paymentsSummary(mes: string): Promise<MonthSummary> {
 export function listCategories(): Promise<Category[]> {
   if (isPreview()) return mock.listCategories();
   return invoke<Category[]>("list_categories");
+}
+
+// ── Deudas ──
+
+export function listDebts(f: {
+  direccion?: string;
+  estado?: string;
+  buscar?: string;
+  limite?: number;
+}): Promise<Debt[]> {
+  const hoy = todayLocal();
+  if (isPreview()) return mock.listDebts({ ...f, hoy });
+  return invoke<Debt[]>("list_debts", {
+    direccion: f.direccion ?? null,
+    estado: f.estado ?? null,
+    buscar: f.buscar ?? null,
+    limite: f.limite ?? null,
+    hoy,
+  });
+}
+
+export function createDebt(input: NewDebtInput): Promise<Debt> {
+  const hoy = todayLocal();
+  if (isPreview()) return mock.createDebt(input, hoy);
+  return invoke<Debt>("create_debt", { input, hoy });
+}
+
+export function updateDebt(id: number, input: EditDebtInput): Promise<Debt> {
+  const hoy = todayLocal();
+  if (isPreview()) return mock.updateDebt(id, input, hoy);
+  return invoke<Debt>("update_debt", { id, input, hoy });
+}
+
+export function deleteDebt(id: number): Promise<void> {
+  if (isPreview()) return mock.deleteDebt(id);
+  return invoke<void>("delete_debt", { id });
+}
+
+export function addDebtPayment(
+  debtId: number,
+  input: NewDebtPaymentInput,
+): Promise<Debt> {
+  const hoy = todayLocal();
+  if (isPreview()) return mock.addDebtPayment(debtId, input, hoy);
+  return invoke<Debt>("add_debt_payment", { debt_id: debtId, input, hoy });
+}
+
+export function listDebtPayments(debtId: number): Promise<DebtPayment[]> {
+  if (isPreview()) return mock.listDebtPayments(debtId);
+  return invoke<DebtPayment[]>("list_debt_payments", { debt_id: debtId });
+}
+
+export function debtsSummary(): Promise<DebtsSummary> {
+  if (isPreview()) return mock.debtsSummary();
+  return invoke<DebtsSummary>("debts_summary");
+}
+
+// ── Contactos ──
+
+export function listContacts(buscar?: string): Promise<Contact[]> {
+  if (isPreview()) return mock.listContacts(buscar);
+  return invoke<Contact[]>("list_contacts", { buscar: buscar ?? null });
+}
+
+export function createContact(input: NewContactInput): Promise<Contact> {
+  if (isPreview()) return mock.createContact(input);
+  return invoke<Contact>("create_contact", { input });
+}
+
+export function updateContact(
+  id: number,
+  input: NewContactInput,
+): Promise<Contact> {
+  if (isPreview()) return mock.updateContact(id, input);
+  return invoke<Contact>("update_contact", { id, input });
+}
+
+export function deleteContact(id: number): Promise<void> {
+  if (isPreview()) return mock.deleteContact(id);
+  return invoke<void>("delete_contact", { id });
 }

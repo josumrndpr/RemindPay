@@ -33,7 +33,7 @@ Sidebar: Dashboard / Pagos / Deudas / Recordatorios / Contactos / Config. PIN ga
 ## Fases
 - [x] **Fase 0** — scaffold, Tailwind, plugins (notification/autostart/single-instance/dialog), schema, shell + comando ping Rust, build web verde (tsc+vite). Rust sin compilar aún: requiere workload C++ (ver requisito de máquina).
 - [x] **Fase 1 (código)** — Pagos + Dashboard (CRUD, filtros, balance, SQLite en Rust con 5 tests). Compilación Rust pendiente del workload C++.
-- [ ] **Fase 2** — Deudas + abonos.
+- [x] **Fase 2 (código)** — Deudas + abonos + Contactos (CRUD, sobrepago limitado con saldo automático, vencidas derivadas, resumen por cobrar/por pagar, 10 tests). Categoría "Suscripción" agregada (seed idempotente). Compilación Rust pendiente del workload C++.
 - [ ] **Fase 3** — Recordatorios + notificaciones + sonido + autostart + tray + persistentes.
 - [ ] **Fase 4** — PIN real (Argon2), backups diarios, export CSV, tema, instalador NSIS firmado local.
 

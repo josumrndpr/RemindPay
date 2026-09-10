@@ -3,11 +3,12 @@ import {
   createPayment,
   deletePayment,
   listCategories,
+  listContacts,
   listPayments,
   updatePayment,
 } from "../lib/api";
 import { fmtFecha, fmtUSD, monthLocal, todayLocal } from "../lib/format";
-import type { Category, Payment, PaymentType } from "../lib/types";
+import type { Category, Contact, Payment, PaymentType } from "../lib/types";
 import Modal from "./Modal";
 
 interface FormState {
@@ -15,6 +16,7 @@ interface FormState {
   monto: string;
   fecha: string;
   categoria_id: string;
+  contacto_id: string;
   descripcion: string;
 }
 
@@ -23,6 +25,7 @@ const EMPTY_FORM: FormState = {
   monto: "",
   fecha: todayLocal(),
   categoria_id: "",
+  contacto_id: "",
   descripcion: "",
 };
 
@@ -32,6 +35,7 @@ const inputCls =
 export default function Pagos({ signalNuevo }: { signalNuevo: number }) {
   const [items, setItems] = useState<Payment[]>([]);
   const [cats, setCats] = useState<Category[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
   const [buscar, setBuscar] = useState("");
   const [tipo, setTipo] = useState<"" | PaymentType>("");
   const [mes, setMes] = useState(monthLocal());
@@ -46,7 +50,7 @@ export default function Pagos({ signalNuevo }: { signalNuevo: number }) {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [p, c] = await Promise.all([
+      const [p, c, ct] = await Promise.all([
         listPayments({
           tipo: tipo || undefined,
           mes: mes || undefined,
@@ -54,9 +58,11 @@ export default function Pagos({ signalNuevo }: { signalNuevo: number }) {
           limite: 500,
         }),
         listCategories(),
+        listContacts(),
       ]);
       setItems(p);
       setCats(c);
+      setContacts(ct);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -93,6 +99,7 @@ export default function Pagos({ signalNuevo }: { signalNuevo: number }) {
       monto: (p.monto_cents / 100).toString(),
       fecha: p.fecha,
       categoria_id: p.categoria_id?.toString() ?? "",
+      contacto_id: p.contacto_id?.toString() ?? "",
       descripcion: p.descripcion,
     });
     setFormError(null);
@@ -117,6 +124,7 @@ export default function Pagos({ signalNuevo }: { signalNuevo: number }) {
         monto,
         fecha: form.fecha,
         categoria_id: form.categoria_id ? Number(form.categoria_id) : null,
+        contacto_id: form.contacto_id ? Number(form.contacto_id) : null,
         descripcion: form.descripcion.trim(),
       };
       if (editing) await updatePayment(editing.id, input);
@@ -337,6 +345,20 @@ export default function Pagos({ signalNuevo }: { signalNuevo: number }) {
             >
               <option value="">Sin categoría</option>
               {catsFiltradas.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.nombre}
+                </option>
+              ))}
+            </select>
+            <select
+              value={form.contacto_id}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, contacto_id: e.target.value }))
+              }
+              className={inputCls}
+            >
+              <option value="">Sin contacto</option>
+              {contacts.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.nombre}
                 </option>

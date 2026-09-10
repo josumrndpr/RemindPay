@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { listPayments, paymentsSummary } from "../lib/api";
+import { debtsSummary, listPayments, paymentsSummary } from "../lib/api";
 import { fmtFecha, fmtUSD, monthLabel, monthLocal } from "../lib/format";
-import type { MonthSummary, Payment } from "../lib/types";
+import type { DebtsSummary, MonthSummary, Payment } from "../lib/types";
 
 function StatCard({
   title,
@@ -36,17 +36,20 @@ export default function Dashboard({
 }) {
   const [mes, setMes] = useState(monthLocal());
   const [summary, setSummary] = useState<MonthSummary | null>(null);
+  const [debts, setDebts] = useState<DebtsSummary | null>(null);
   const [recent, setRecent] = useState<Payment[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [s, r] = await Promise.all([
+      const [s, d, r] = await Promise.all([
         paymentsSummary(mes),
+        debtsSummary(),
         listPayments({ limite: 8 }),
       ]);
       setSummary(s);
+      setDebts(d);
       setRecent(r);
     } catch (e) {
       setError(String(e));
@@ -104,6 +107,19 @@ export default function Dashboard({
           title="Gastos"
           value={fmtUSD(summary?.gastos_cents ?? 0)}
           hint="salidas del mes"
+        />
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+        <StatCard
+          title="Por cobrar"
+          value={fmtUSD(debts?.por_cobrar_cents ?? 0)}
+          hint="te deben"
+        />
+        <StatCard
+          title="Por pagar"
+          value={fmtUSD(debts?.por_pagar_cents ?? 0)}
+          hint={`yo debo · ${debts?.activas ?? 0} deudas vivas`}
         />
       </div>
 
