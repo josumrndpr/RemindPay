@@ -32,6 +32,9 @@ const P: Record<string, string> = {
   calendar:
     "M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 10h16M8.5 3v4M15.5 3v4",
   search: "M11 4.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM16 16l5 5",
+  minus: "M6 12h12",
+  square: "M6.5 6.5h11v11h-11z",
+  restore: "M8 8h12v12H8zM4 16V4h12",
   trendingUp: "M3.5 17l5.5-5.5 3.5 3.5 7-7M14.5 8H19.5v5",
   wallet:
     "M4 7a2 2 0 0 1 2-2h13v4M4 7v11a2 2 0 0 0 2 2h14a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1M16.5 14h.5",

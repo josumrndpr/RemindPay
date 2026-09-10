@@ -7,6 +7,7 @@ import DuePanel from "./components/DuePanel";
 import Pagos from "./components/Pagos";
 import PinGate from "./components/PinGate";
 import Recordatorios from "./components/Recordatorios";
+import Titlebar from "./components/Titlebar";
 import { Icon, Logo } from "./components/ui";
 import {
   createBackup,
@@ -259,7 +260,9 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-full bg-zinc-950 text-zinc-50">
+    <div className="flex h-full flex-col bg-zinc-950 text-zinc-50">
+      <Titlebar />
+      <div className="flex min-h-0 flex-1">
       {/* Sidebar */}
       <aside className="flex w-64 shrink-0 flex-col border-r border-zinc-800/80 bg-zinc-900/30">
         <div className="flex items-center gap-2.5 px-5 pb-5 pt-6">
@@ -358,6 +361,7 @@ export default function App() {
           {section === "config" && <Config />}
         </div>
       </main>
+      </div>
 
       <DuePanel
         items={dueItems}
