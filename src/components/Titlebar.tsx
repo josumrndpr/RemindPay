@@ -1,6 +1,8 @@
 // RemindPay — barra de título propia (ventana sin decoración nativa).
-// En vista previa web no se muestra: el navegador ya tiene su marco.
+// Arrastre MANUAL (setPosition): el arrastre del SO falló en esta máquina,
+// así no dependemos de él. En vista previa web no se muestra.
 import { useEffect, useState } from "react";
+import { PhysicalPosition } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isPreview } from "../lib/api";
 import { Icon, Logo } from "./ui";
@@ -62,13 +64,30 @@ export default function Titlebar() {
     }
   }
 
-  // Arrastre manual: más fiable que solo el atributo en Windows.
+  // Arrastre manual: guarda el punto inicial y mueve la ventana con el mouse.
   async function empezarArrastre(e: React.MouseEvent) {
     if (e.button !== 0) return;
     if ((e.target as HTMLElement).closest("button")) return;
     try {
-      if (await win().isMaximized()) return;
-      await win().startDragging();
+      const w = win();
+      if (await w.isMaximized()) return;
+      const pos = await w.outerPosition();
+      const scale = await w.scaleFactor();
+      const startX = e.screenX;
+      const startY = e.screenY;
+      const mover = (ev: MouseEvent) => {
+        const x = Math.round(pos.x + (ev.screenX - startX) * scale);
+        const y = Math.round(pos.y + (ev.screenY - startY) * scale);
+        void w
+          .setPosition(new PhysicalPosition(x, y))
+          .catch(() => {});
+      };
+      const soltar = () => {
+        window.removeEventListener("mousemove", mover);
+        window.removeEventListener("mouseup", soltar);
+      };
+      window.addEventListener("mousemove", mover);
+      window.addEventListener("mouseup", soltar);
     } catch {
       /* sin ventana nativa */
     }
