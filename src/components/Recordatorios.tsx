@@ -18,6 +18,19 @@ import type {
   Reminder,
 } from "../lib/types";
 import Modal from "./Modal";
+import {
+  Badge,
+  Empty,
+  ErrorBox,
+  Field,
+  Icon,
+  btnDangerSm,
+  btnGhostSm,
+  btnPrimary,
+  btnSecondary,
+  cardCls,
+  inputCls,
+} from "./ui";
 
 type Tab = "pendientes" | "historial";
 
@@ -38,9 +51,6 @@ const REPETIR: { id: Recurrence; label: string }[] = [
   { id: "weekly", label: "Semanal" },
   { id: "monthly", label: "Mensual" },
 ];
-
-const inputCls =
-  "w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 outline-none focus:border-emerald-500";
 
 function repetirLabel(r: Recurrence): string {
   return REPETIR.find((x) => x.id === r)?.label ?? r;
@@ -192,67 +202,94 @@ export default function Recordatorios({
 
   return (
     <div>
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight">
+          <h2 className="text-[26px] font-bold tracking-tight">
             Recordatorios
           </h2>
-          <p className="mt-1 text-sm text-zinc-500">
+          <p className="mt-0.5 text-sm text-zinc-500">
             Avisos en tu PC con sonido · persisten hasta marcarlos hecho
           </p>
         </div>
-        <button
-          onClick={openNuevo}
-          className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400"
-        >
-          + Nuevo recordatorio (R)
+        <button onClick={openNuevo} className={btnPrimary}>
+          <Icon name="plus" size={15} />
+          Nuevo recordatorio
+          <kbd className="rounded-md bg-zinc-950/20 px-1.5 py-0.5 font-sans text-[10px]">
+            R
+          </kbd>
         </button>
       </div>
 
-      <div className="mt-5 flex flex-wrap gap-2">
-        <button
-          onClick={() => setTab("pendientes")}
-          className={`rounded-lg px-3 py-1.5 text-sm ${
-            tab === "pendientes"
-              ? "bg-emerald-500/15 font-medium text-emerald-300"
-              : "bg-zinc-800/70 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
-          }`}
-        >
-          Pendientes ({pendientes.length}
-          {vencidos > 0 ? ` · ${vencidos} vencidos` : ""})
-        </button>
-        <button
-          onClick={() => setTab("historial")}
-          className={`rounded-lg px-3 py-1.5 text-sm ${
-            tab === "historial"
-              ? "bg-emerald-500/15 font-medium text-emerald-300"
-              : "bg-zinc-800/70 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
-          }`}
-        >
-          Historial ({historial.length})
-        </button>
-        <input
-          value={buscar}
-          onChange={(e) => setBuscar(e.target.value)}
-          placeholder="Buscar…"
-          className={`${inputCls} max-w-xs`}
-        />
+      <div className={`${cardCls} mt-5 flex flex-wrap items-center gap-2 p-3`}>
+        <div className="flex gap-1.5">
+          <button
+            onClick={() => setTab("pendientes")}
+            className={`rounded-lg px-3 py-1.5 text-sm transition-all ${
+              tab === "pendientes"
+                ? "bg-emerald-500/15 font-semibold text-emerald-300"
+                : "text-zinc-400 hover:bg-zinc-800/70 hover:text-zinc-200"
+            }`}
+          >
+            Pendientes ({pendientes.length}
+            {vencidos > 0 ? ` · ${vencidos} vencidos` : ""})
+          </button>
+          <button
+            onClick={() => setTab("historial")}
+            className={`rounded-lg px-3 py-1.5 text-sm transition-all ${
+              tab === "historial"
+                ? "bg-emerald-500/15 font-semibold text-emerald-300"
+                : "text-zinc-400 hover:bg-zinc-800/70 hover:text-zinc-200"
+            }`}
+          >
+            Historial ({historial.length})
+          </button>
+        </div>
+        <div className="relative min-w-48 flex-1">
+          <Icon
+            name="search"
+            size={15}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
+          />
+          <input
+            value={buscar}
+            onChange={(e) => setBuscar(e.target.value)}
+            placeholder="Buscar…"
+            aria-label="Buscar"
+            className={`${inputCls} pl-9`}
+          />
+        </div>
       </div>
 
       {error && (
-        <p className="mt-4 rounded-lg border border-red-900 bg-red-950/50 px-3 py-2 text-sm text-red-300">
-          {error}
-        </p>
+        <div className="mt-4">
+          <ErrorBox>{error}</ErrorBox>
+        </div>
       )}
 
       {loading ? (
-        <p className="mt-8 text-center text-sm text-zinc-500">Cargando…</p>
+        <div className="flex justify-center py-12">
+          <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-zinc-700 border-t-emerald-400" />
+        </div>
       ) : visible.length === 0 ? (
-        <p className="mt-8 text-center text-sm text-zinc-500">
-          {tab === "pendientes"
-            ? "Sin pendientes. Crea el primero con “+ Nuevo recordatorio”."
-            : "Nada por aquí todavía."}
-        </p>
+        <div className={`${cardCls} mt-4`}>
+          <Empty
+            icon="bell"
+            title={tab === "pendientes" ? "Sin pendientes" : "Nada por aquí"}
+            hint={
+              tab === "pendientes"
+                ? "Crea el primero con el botón Nuevo recordatorio."
+                : "Los avisos completados aparecen aquí."
+            }
+            action={
+              tab === "pendientes" ? (
+                <button onClick={openNuevo} className={btnSecondary}>
+                  <Icon name="plus" size={15} />
+                  Nuevo recordatorio
+                </button>
+              ) : undefined
+            }
+          />
+        </div>
       ) : (
         <div className="mt-4 space-y-3">
           {visible.map((r) => {
@@ -260,73 +297,76 @@ export default function Recordatorios({
             return (
               <div
                 key={r.id}
-                className={`rounded-xl border p-4 ${
-                  vencido
-                    ? "border-red-900 bg-red-950/30"
-                    : "border-zinc-800 bg-zinc-900/60"
-                }`}
+                className={`${cardCls} anim-rise flex items-start gap-3.5 p-4 transition-all hover:border-zinc-700 ${
+                  vencido ? "!border-red-900/70" : ""
+                } ${r.hecho ? "opacity-60" : ""}`}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="font-medium">
-                      {r.titulo}{" "}
-                      {vencido && (
-                        <span className="ml-1 rounded bg-red-500/15 px-1.5 py-0.5 text-xs text-red-300">
-                          Vencido
-                        </span>
-                      )}
-                      {r.repetir !== "none" && (
-                        <span className="ml-1 rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-400">
-                          {repetirLabel(r.repetir)}
-                        </span>
-                      )}
-                    </p>
-                    <p className="mt-0.5 text-sm text-zinc-400">
-                      {fmtFechaHora(r.fecha_hora)}
-                      {r.sonido ? " · con sonido" : ""}
-                    </p>
-                    {r.detalle && (
-                      <p className="mt-1 text-sm text-zinc-500">{r.detalle}</p>
-                    )}
-                    {(r.debt_id != null || r.payment_id != null) && (
-                      <p className="mt-1 text-xs text-zinc-500">
-                        {r.debt_id != null &&
-                          `Deuda: ${deudaNombre(r.debt_id) ?? `#${r.debt_id}`}`}
-                        {r.debt_id != null && r.payment_id != null && " · "}
-                        {r.payment_id != null &&
-                          `Pago: ${pagoNombre(r.payment_id) ?? `#${r.payment_id}`}`}
-                      </p>
+                <span
+                  className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${
+                    vencido
+                      ? "bg-red-500/15 text-red-300"
+                      : r.hecho
+                        ? "bg-zinc-800 text-zinc-500"
+                        : "bg-amber-500/15 text-amber-300"
+                  }`}
+                >
+                  <Icon name="bell" size={18} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <p className="font-semibold tracking-tight">{r.titulo}</p>
+                    {vencido && <Badge tone="red">Vencido</Badge>}
+                    {r.repetir !== "none" && (
+                      <Badge tone="zinc">{repetirLabel(r.repetir)}</Badge>
                     )}
                   </div>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {!r.hecho ? (
-                    <button
-                      onClick={() => void completar(r)}
-                      className="rounded-lg bg-emerald-500 px-3 py-1.5 text-sm font-medium text-zinc-950 hover:bg-emerald-400"
-                    >
-                      Marcar hecho
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => void reabrir(r)}
-                      className="rounded-lg bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 hover:bg-zinc-700"
-                    >
-                      Reabrir
-                    </button>
+                  <p className="tnum mt-0.5 text-sm text-zinc-400">
+                    {fmtFechaHora(r.fecha_hora)}
+                    {r.sonido ? " · con sonido" : ""}
+                  </p>
+                  {r.detalle && (
+                    <p className="mt-1 truncate text-sm text-zinc-500">
+                      {r.detalle}
+                    </p>
                   )}
-                  <button
-                    onClick={() => openEditar(r)}
-                    className="rounded-lg px-3 py-1.5 text-sm text-zinc-400 hover:text-zinc-100"
-                  >
-                    Editar
-                  </button>
-                  <button
-                    onClick={() => void eliminar(r)}
-                    className="rounded-lg px-3 py-1.5 text-sm text-zinc-500 hover:text-red-300"
-                  >
-                    Eliminar
-                  </button>
+                  {(r.debt_id != null || r.payment_id != null) && (
+                    <p className="mt-1 text-xs text-zinc-500">
+                      {r.debt_id != null &&
+                        `Deuda: ${deudaNombre(r.debt_id) ?? `#${r.debt_id}`}`}
+                      {r.debt_id != null && r.payment_id != null && " · "}
+                      {r.payment_id != null &&
+                        `Pago: ${pagoNombre(r.payment_id) ?? `#${r.payment_id}`}`}
+                    </p>
+                  )}
+                  <div className="mt-2.5 flex flex-wrap gap-1.5">
+                    {!r.hecho ? (
+                      <button
+                        onClick={() => void completar(r)}
+                        className="rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-zinc-950 transition-all hover:bg-emerald-400 active:scale-[.98]"
+                      >
+                        Marcar hecho
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => void reabrir(r)}
+                        className={`${btnSecondary} !px-3 !py-1.5 !text-xs`}
+                      >
+                        Reabrir
+                      </button>
+                    )}
+                    <button
+                      onClick={() => openEditar(r)}
+                      className={`${btnGhostSm} px-2 text-[13px]`}
+                    >
+                      Editar
+                    </button>
+                    <button
+                      onClick={() => void eliminar(r)}
+                      className={`${btnDangerSm} px-2 text-[13px]`}
+                    >
+                      Eliminar
+                    </button>
+                  </div>
                 </div>
               </div>
             );
@@ -339,118 +379,145 @@ export default function Recordatorios({
           title={editing ? "Editar recordatorio" : "Nuevo recordatorio"}
           onClose={() => setModalOpen(false)}
         >
-          <div className="space-y-3">
-            <input
-              value={form.titulo}
-              onChange={(e) => setForm((f) => ({ ...f, titulo: e.target.value }))}
-              placeholder="Título (ej. Pagar tarjeta)"
-              maxLength={140}
-              className={inputCls}
-            />
-            <textarea
-              value={form.detalle}
-              onChange={(e) => setForm((f) => ({ ...f, detalle: e.target.value }))}
-              placeholder="Detalle (opcional)"
-              rows={2}
-              maxLength={500}
-              className={inputCls}
-            />
-            <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-3.5">
+            <Field label="Título">
               <input
-                type="datetime-local"
-                value={form.fecha_hora}
+                value={form.titulo}
                 onChange={(e) =>
-                  setForm((f) => ({ ...f, fecha_hora: e.target.value }))
+                  setForm((f) => ({ ...f, titulo: e.target.value }))
                 }
+                placeholder="Ej. Pagar tarjeta"
+                maxLength={140}
                 className={inputCls}
               />
-              <select
-                value={form.repetir}
+            </Field>
+            <Field label="Detalle">
+              <textarea
+                value={form.detalle}
                 onChange={(e) =>
-                  setForm((f) => ({
-                    ...f,
-                    repetir: e.target.value as Recurrence,
-                  }))
+                  setForm((f) => ({ ...f, detalle: e.target.value }))
                 }
+                placeholder="Opcional"
+                rows={2}
+                maxLength={500}
                 className={inputCls}
+              />
+            </Field>
+            <div className="grid grid-cols-2 gap-2.5">
+              <Field label="Fecha y hora">
+                <input
+                  type="datetime-local"
+                  value={form.fecha_hora}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, fecha_hora: e.target.value }))
+                  }
+                  className={inputCls}
+                />
+              </Field>
+              <Field label="Repetición">
+                <select
+                  value={form.repetir}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      repetir: e.target.value as Recurrence,
+                    }))
+                  }
+                  className={inputCls}
+                >
+                  {REPETIR.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-2.5">
+              <Field label="Deuda vinculada">
+                <select
+                  value={form.debt_id?.toString() ?? ""}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      debt_id: e.target.value ? Number(e.target.value) : null,
+                    }))
+                  }
+                  className={inputCls}
+                >
+                  <option value="">Ninguna</option>
+                  {debts.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.persona}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Pago vinculado">
+                <select
+                  value={form.payment_id?.toString() ?? ""}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      payment_id: e.target.value ? Number(e.target.value) : null,
+                    }))
+                  }
+                  className={inputCls}
+                >
+                  <option value="">Ninguno</option>
+                  {payments.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.descripcion || `Pago ${p.id}`} · {p.fecha}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            <div className="flex gap-2">
+              {(
+                [
+                  ["sonido", "Sonido"],
+                  ["persistente", "Persistente"],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setForm((f) => ({ ...f, [key]: !f[key] }))}
+                  aria-pressed={form[key]}
+                  className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-all ${
+                    form[key]
+                      ? "bg-emerald-500/15 text-emerald-300"
+                      : "bg-zinc-800 text-zinc-500 hover:text-zinc-300"
+                  }`}
+                >
+                  <Icon
+                    name={form[key] ? "check" : "x"}
+                    size={14}
+                  />
+                  {label}
+                </button>
+              ))}
+            </div>
+            {formError && <ErrorBox>{formError}</ErrorBox>}
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => setModalOpen(false)}
+                className={`${btnSecondary} flex-1`}
               >
-                {REPETIR.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.label}
-                  </option>
-                ))}
-              </select>
+                Cancelar
+              </button>
+              <button
+                onClick={() => void guardar()}
+                disabled={saving}
+                className={`${btnPrimary} flex-1`}
+              >
+                {saving
+                  ? "Guardando…"
+                  : editing
+                    ? "Guardar cambios"
+                    : "Agregar recordatorio"}
+              </button>
             </div>
-            <select
-              value={form.debt_id?.toString() ?? ""}
-              onChange={(e) =>
-                setForm((f) => ({
-                  ...f,
-                  debt_id: e.target.value ? Number(e.target.value) : null,
-                }))
-              }
-              className={inputCls}
-            >
-              <option value="">Sin deuda vinculada</option>
-              {debts.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.persona}
-                </option>
-              ))}
-            </select>
-            <select
-              value={form.payment_id?.toString() ?? ""}
-              onChange={(e) =>
-                setForm((f) => ({
-                  ...f,
-                  payment_id: e.target.value ? Number(e.target.value) : null,
-                }))
-              }
-              className={inputCls}
-            >
-              <option value="">Sin pago vinculado</option>
-              {payments.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.descripcion || `Pago ${p.id}`} · {p.fecha}
-                </option>
-              ))}
-            </select>
-            <div className="flex gap-4 text-sm">
-              <label className="flex items-center gap-2 text-zinc-300">
-                <input
-                  type="checkbox"
-                  checked={form.sonido}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, sonido: e.target.checked }))
-                  }
-                  className="accent-emerald-500"
-                />
-                Sonido
-              </label>
-              <label className="flex items-center gap-2 text-zinc-300">
-                <input
-                  type="checkbox"
-                  checked={form.persistente}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, persistente: e.target.checked }))
-                  }
-                  className="accent-emerald-500"
-                />
-                Persistente hasta marcar hecho
-              </label>
-            </div>
-            {formError && <p className="text-sm text-red-300">{formError}</p>}
-            <button
-              onClick={() => void guardar()}
-              disabled={saving}
-              className="w-full rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400 disabled:opacity-50"
-            >
-              {saving
-                ? "Guardando…"
-                : editing
-                  ? "Guardar cambios"
-                  : "Agregar recordatorio"}
-            </button>
           </div>
         </Modal>
       )}

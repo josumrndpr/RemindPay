@@ -7,6 +7,7 @@ import DuePanel from "./components/DuePanel";
 import Pagos from "./components/Pagos";
 import PinGate from "./components/PinGate";
 import Recordatorios from "./components/Recordatorios";
+import { Icon, Logo } from "./components/ui";
 import {
   createBackup,
   dueReminders,
@@ -17,22 +18,68 @@ import {
   ping,
   updateReminder,
 } from "./lib/api";
-import { ahoraArchivo, ahoraLocal, sumarMinutos, todayLocal } from "./lib/format";
+import {
+  ahoraArchivo,
+  ahoraLocal,
+  sumarMinutos,
+  todayLocal,
+} from "./lib/format";
 import { avisar } from "./lib/notify";
 import { completarRecordatorio } from "./lib/recordatorios";
 import { beep } from "./lib/sound";
 import type { Reminder, Section } from "./lib/types";
 
-const NAV: { id: Section; label: string; fase?: string }[] = [
-  { id: "dashboard", label: "Dashboard" },
-  { id: "pagos", label: "Pagos" },
-  { id: "deudas", label: "Deudas" },
-  { id: "recordatorios", label: "Recordatorios" },
-  { id: "contactos", label: "Contactos" },
-  { id: "config", label: "Configuración" },
+const NAV_MAIN: { id: Section; label: string; icon: "dashboard" | "pagos" | "deudas" | "bell"; atajo: string }[] = [
+  { id: "dashboard", label: "Dashboard", icon: "dashboard", atajo: "" },
+  { id: "pagos", label: "Pagos", icon: "pagos", atajo: "N" },
+  { id: "deudas", label: "Deudas", icon: "deudas", atajo: "D" },
+  { id: "recordatorios", label: "Recordatorios", icon: "bell", atajo: "R" },
+];
+
+const NAV_SYS: { id: Section; label: string; icon: "users" | "sliders" }[] = [
+  { id: "contactos", label: "Contactos", icon: "users" },
+  { id: "config", label: "Configuración", icon: "sliders" },
 ];
 
 type Lock = "cargando" | "crear" | "pedir" | "ok";
+
+function NavButton({
+  active,
+  icon,
+  label,
+  atajo,
+  onClick,
+}: {
+  active: boolean;
+  icon: "dashboard" | "pagos" | "deudas" | "bell" | "users" | "sliders";
+  label: string;
+  atajo?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`group relative flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-sm transition-all ${
+        active
+          ? "bg-emerald-500/15 font-semibold text-emerald-300"
+          : "text-zinc-400 hover:bg-zinc-800/70 hover:text-zinc-100"
+      }`}
+    >
+      <span
+        className={`absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-full bg-emerald-400 transition-opacity ${
+          active ? "opacity-100" : "opacity-0"
+        }`}
+      />
+      <Icon name={icon} size={17} className="shrink-0" />
+      <span className="flex-1 text-left">{label}</span>
+      {atajo && (
+        <kbd className="rounded-md border border-zinc-700/80 bg-zinc-800/80 px-1.5 py-0.5 font-sans text-[10px] text-zinc-500">
+          {atajo}
+        </kbd>
+      )}
+    </button>
+  );
+}
 
 export default function App() {
   const [lock, setLock] = useState<Lock>("cargando");
@@ -214,82 +261,102 @@ export default function App() {
   return (
     <div className="flex h-full bg-zinc-950 text-zinc-50">
       {/* Sidebar */}
-      <aside className="flex w-60 shrink-0 flex-col border-r border-zinc-800 bg-zinc-900/40">
-        <div className="px-5 pb-4 pt-6">
-          <h1 className="text-xl font-bold tracking-tight">
-            Remind<span className="text-emerald-400">Pay</span>
-          </h1>
-          <p className="mt-0.5 text-xs text-zinc-500">100% local · USD</p>
+      <aside className="flex w-64 shrink-0 flex-col border-r border-zinc-800/80 bg-zinc-900/30">
+        <div className="flex items-center gap-2.5 px-5 pb-5 pt-6">
+          <Logo />
+          <div>
+            <p className="text-[17px] font-bold leading-tight tracking-tight">
+              Remind<span className="text-emerald-400">Pay</span>
+            </p>
+            <p className="text-[11px] text-zinc-500">100% local · USD</p>
+          </div>
         </div>
-        <nav className="flex-1 space-y-1 px-3">
-          {NAV.map((item) => (
-            <button
+
+        <nav className="flex-1 space-y-0.5 overflow-y-auto px-3">
+          <p className="px-3 pb-1.5 pt-1 text-[11px] font-semibold uppercase tracking-wider text-zinc-600">
+            Principal
+          </p>
+          {NAV_MAIN.map((item) => (
+            <NavButton
               key={item.id}
+              active={section === item.id}
+              icon={item.icon}
+              label={item.label}
+              atajo={item.atajo}
               onClick={() => setSection(item.id)}
-              className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors ${
-                section === item.id
-                  ? "bg-emerald-500/15 font-medium text-emerald-300"
-                  : "text-zinc-400 hover:bg-zinc-800/70 hover:text-zinc-200"
-              }`}
-            >
-              {item.label}
-              {item.fase && (
-                <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500">
-                  {item.fase}
-                </span>
-              )}
-            </button>
+            />
+          ))}
+          <p className="px-3 pb-1.5 pt-4 text-[11px] font-semibold uppercase tracking-wider text-zinc-600">
+            General
+          </p>
+          {NAV_SYS.map((item) => (
+            <NavButton
+              key={item.id}
+              active={section === item.id}
+              icon={item.icon}
+              label={item.label}
+              onClick={() => setSection(item.id)}
+            />
           ))}
         </nav>
-        <div className="space-y-2 border-t border-zinc-800 p-4 text-xs text-zinc-500">
+
+        <div className="space-y-2.5 border-t border-zinc-800/80 p-4">
           <button
             onClick={() => setLock("pedir")}
-            className="w-full rounded-lg bg-zinc-800 px-3 py-1.5 text-zinc-200 hover:bg-zinc-700"
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-700 hover:text-zinc-100"
           >
+            <Icon name="lock" size={14} />
             Bloquear
           </button>
-          <div>
-            <p className="font-medium text-zinc-400">Puente Rust</p>
-            {bridge === null ? (
-              <button
-                onClick={testBridge}
-                className="mt-2 w-full rounded-lg bg-zinc-800 px-3 py-1.5 text-zinc-200 hover:bg-zinc-700"
-              >
-                Probar conexión
-              </button>
-            ) : (
-              <button onClick={testBridge} className="mt-2 w-full text-left">
-                <span className="block truncate font-mono text-emerald-400">
-                  {bridge}
-                </span>
-                {bridgeMs !== null && (
-                  <span className="text-zinc-500">{bridgeMs} ms</span>
-                )}
-              </button>
-            )}
-          </div>
+          <button
+            onClick={testBridge}
+            className="flex w-full items-center gap-2 rounded-xl px-3 py-1.5 text-left text-[11px] text-zinc-500 transition-colors hover:bg-zinc-800/60"
+          >
+            <span className="relative flex h-2 w-2 shrink-0">
+              <span
+                className={`absolute h-full w-full rounded-full ${
+                  bridge?.startsWith("Error")
+                    ? "bg-red-400"
+                    : "animate-pulse bg-emerald-400"
+                }`}
+              />
+            </span>
+            <span className="truncate font-mono">
+              {bridge === null
+                ? "Motor Rust · clic para probar"
+                : bridgeMs !== null
+                  ? `${bridge} · ${bridgeMs} ms`
+                  : bridge}
+            </span>
+          </button>
         </div>
       </aside>
 
       {/* Contenido */}
-      <main className="flex-1 overflow-y-auto p-8">
-        {isPreview() && (
-          <div className="mb-6 rounded-lg border border-amber-800 bg-amber-950/60 px-4 py-2.5 text-sm text-amber-200">
-            Vista previa web con datos de ejemplo (se borran al recargar). El
-            backend real SQLite se activa al compilar la app de escritorio.
-          </div>
-        )}
-        {section === "dashboard" && <Dashboard onNuevoPago={nuevoPago} />}
-        {section === "pagos" && <Pagos signalNuevo={signalNuevo} />}
-        {section === "deudas" && <Deudas signalNueva={signalDeuda} />}
-        {section === "recordatorios" && (
-          <Recordatorios
-            signalNuevo={signalRec}
-            onChanged={() => void revisar(false)}
-          />
-        )}
-        {section === "contactos" && <Contactos />}
-        {section === "config" && <Config />}
+      <main className="flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-6xl p-8">
+          {isPreview() && (
+            <div className="anim-rise mb-6 flex items-start gap-2.5 rounded-2xl border border-amber-800/70 bg-amber-950/50 px-4 py-3 text-sm text-amber-200">
+              <Icon name="alert" size={16} className="mt-0.5 shrink-0" />
+              <span>
+                Vista previa web con datos de ejemplo (se borran al recargar).
+                El backend real SQLite se activa al compilar la app de
+                escritorio.
+              </span>
+            </div>
+          )}
+          {section === "dashboard" && <Dashboard onNuevoPago={nuevoPago} />}
+          {section === "pagos" && <Pagos signalNuevo={signalNuevo} />}
+          {section === "deudas" && <Deudas signalNueva={signalDeuda} />}
+          {section === "recordatorios" && (
+            <Recordatorios
+              signalNuevo={signalRec}
+              onChanged={() => void revisar(false)}
+            />
+          )}
+          {section === "contactos" && <Contactos />}
+          {section === "config" && <Config />}
+        </div>
       </main>
 
       <DuePanel

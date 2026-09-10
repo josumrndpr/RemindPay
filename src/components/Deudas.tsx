@@ -16,6 +16,19 @@ import type {
   DebtPayment,
 } from "../lib/types";
 import Modal from "./Modal";
+import {
+  Badge,
+  Empty,
+  ErrorBox,
+  Field,
+  Icon,
+  btnDangerSm,
+  btnGhostSm,
+  btnPrimary,
+  btnSecondary,
+  cardCls,
+  inputCls,
+} from "./ui";
 
 type Tab = "pendientes" | "vencidas" | "saldadas" | "todas";
 
@@ -36,9 +49,6 @@ const EMPTY_FORM: DeudaForm = {
   contacto_id: "",
   notas: "",
 };
-
-const inputCls =
-  "w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 outline-none focus:border-emerald-500";
 
 export default function Deudas({ signalNueva }: { signalNueva: number }) {
   const [debts, setDebts] = useState<Debt[]>([]);
@@ -239,64 +249,90 @@ export default function Deudas({ signalNueva }: { signalNueva: number }) {
 
   return (
     <div>
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight">Deudas</h2>
-          <p className="mt-1 text-sm text-zinc-500">
+          <h2 className="text-[26px] font-bold tracking-tight">Deudas</h2>
+          <p className="mt-0.5 text-sm text-zinc-500">
             Quién te debe y a quién debes · con abonos parciales
           </p>
         </div>
-        <button
-          onClick={openNueva}
-          className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400"
-        >
-          + Nueva deuda (D)
+        <button onClick={openNueva} className={btnPrimary}>
+          <Icon name="plus" size={15} />
+          Nueva deuda
+          <kbd className="rounded-md bg-zinc-950/20 px-1.5 py-0.5 font-sans text-[10px]">
+            D
+          </kbd>
         </button>
       </div>
 
-      <div className="mt-5 flex flex-wrap gap-2">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`rounded-lg px-3 py-1.5 text-sm ${
-              tab === t.id
-                ? "bg-emerald-500/15 font-medium text-emerald-300"
-                : "bg-zinc-800/70 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
-            }`}
+      <div className={`${cardCls} mt-5 flex flex-wrap items-center gap-2 p-3`}>
+        <div className="flex flex-wrap gap-1.5">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`rounded-lg px-3 py-1.5 text-sm transition-all ${
+                tab === t.id
+                  ? "bg-emerald-500/15 font-semibold text-emerald-300"
+                  : "text-zinc-400 hover:bg-zinc-800/70 hover:text-zinc-200"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-1 flex-wrap justify-end gap-2">
+          <select
+            value={direccion}
+            onChange={(e) => setDireccion(e.target.value as "" | DebtDirection)}
+            aria-label="Dirección"
+            className={`${inputCls} w-auto`}
           >
-            {t.label}
-          </button>
-        ))}
-        <select
-          value={direccion}
-          onChange={(e) => setDireccion(e.target.value as "" | DebtDirection)}
-          className={`${inputCls} w-auto`}
-        >
-          <option value="">Ambas direcciones</option>
-          <option value="debo">Yo debo</option>
-          <option value="me_deben">Me deben</option>
-        </select>
-        <input
-          value={buscar}
-          onChange={(e) => setBuscar(e.target.value)}
-          placeholder="Buscar persona…"
-          className={`${inputCls} max-w-xs`}
-        />
+            <option value="">Ambas direcciones</option>
+            <option value="debo">Yo debo</option>
+            <option value="me_deben">Me deben</option>
+          </select>
+          <div className="relative">
+            <Icon
+              name="search"
+              size={15}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
+            />
+            <input
+              value={buscar}
+              onChange={(e) => setBuscar(e.target.value)}
+              placeholder="Buscar persona…"
+              aria-label="Buscar persona"
+              className={`${inputCls} pl-9`}
+            />
+          </div>
+        </div>
       </div>
 
       {error && (
-        <p className="mt-4 rounded-lg border border-red-900 bg-red-950/50 px-3 py-2 text-sm text-red-300">
-          {error}
-        </p>
+        <div className="mt-4">
+          <ErrorBox>{error}</ErrorBox>
+        </div>
       )}
 
       {loading ? (
-        <p className="mt-8 text-center text-sm text-zinc-500">Cargando…</p>
+        <div className="flex justify-center py-12">
+          <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-zinc-700 border-t-emerald-400" />
+        </div>
       ) : visible.length === 0 ? (
-        <p className="mt-8 text-center text-sm text-zinc-500">
-          Sin deudas aquí. Crea la primera con “+ Nueva deuda”.
-        </p>
+        <div className={`${cardCls} mt-4`}>
+          <Empty
+            icon="deudas"
+            title="Sin deudas aquí"
+            hint="Crea la primera con el botón Nueva deuda."
+            action={
+              <button onClick={openNueva} className={btnSecondary}>
+                <Icon name="plus" size={15} />
+                Nueva deuda
+              </button>
+            }
+          />
+        </div>
       ) : (
         <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
           {visible.map((d) => {
@@ -308,88 +344,108 @@ export default function Deudas({ signalNueva }: { signalNueva: number }) {
             return (
               <div
                 key={d.id}
-                className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-5"
+                className={`${cardCls} anim-rise p-5 transition-all hover:-translate-y-0.5 hover:border-zinc-700 hover:shadow-xl ${
+                  d.estado === "vencida" ? "!border-red-900/70" : ""
+                }`}
               >
                 <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-lg font-medium">{d.persona}</p>
-                    <p className="mt-0.5 text-xs text-zinc-500">
-                      {d.direccion === "debo" ? "Yo debo" : "Me debe"}
-                      {d.contacto ? ` · ${d.contacto}` : ""}
-                      {d.fecha_limite
-                        ? ` · Límite ${fmtFecha(d.fecha_limite)}`
-                        : " · Sin límite"}
-                    </p>
-                  </div>
-                  <span
-                    className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${
-                      d.estado === "saldada"
-                        ? "bg-zinc-700/60 text-zinc-300"
-                        : d.estado === "vencida"
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span
+                      className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${
+                        d.direccion === "debo"
                           ? "bg-red-500/15 text-red-300"
-                          : "bg-amber-500/15 text-amber-300"
-                    }`}
+                          : "bg-emerald-500/15 text-emerald-300"
+                      }`}
+                    >
+                      <Icon name="deudas" size={18} />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-[17px] font-semibold tracking-tight">
+                        {d.persona}
+                      </p>
+                      <p className="mt-0.5 text-xs text-zinc-500">
+                        {d.direccion === "debo" ? "Yo debo" : "Me debe"}
+                        {d.contacto ? ` · ${d.contacto}` : ""}
+                        {d.fecha_limite
+                          ? ` · Límite ${fmtFecha(d.fecha_limite)}`
+                          : " · Sin límite"}
+                      </p>
+                    </div>
+                  </div>
+                  <Badge
+                    tone={
+                      d.estado === "saldada"
+                        ? "zinc"
+                        : d.estado === "vencida"
+                          ? "red"
+                          : "amber"
+                    }
                   >
                     {d.estado === "saldada"
                       ? "Saldada"
                       : d.estado === "vencida"
                         ? "Vencida"
                         : "Activa"}
-                  </span>
+                  </Badge>
                 </div>
 
-                <div className="mt-4 flex items-end justify-between">
+                <div className="mt-4 flex items-end justify-between gap-3">
                   <div>
-                    <p className="text-xs text-zinc-500">Saldo restante</p>
-                    <p className="text-2xl font-semibold tracking-tight">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                      Saldo restante
+                    </p>
+                    <p className="tnum mt-0.5 text-[26px] font-semibold leading-none tracking-tight">
                       {fmtUSD(d.saldo_cents)}
                     </p>
                   </div>
-                  <p className="text-right text-xs text-zinc-500">
+                  <p className="tnum text-right text-xs leading-relaxed text-zinc-500">
                     Total {fmtUSD(d.monto_total_cents)}
                     <br />
-                    Abonado {fmtUSD(abonado)} ({pct}%)
+                    Abonado {fmtUSD(abonado)} · {pct}%
                   </p>
                 </div>
-                <div className="mt-2 h-2 overflow-hidden rounded-full bg-zinc-800">
+                <div className="mt-2.5 h-2 overflow-hidden rounded-full bg-zinc-800">
                   <div
-                    className={`h-full rounded-full ${
+                    className={`h-full rounded-full transition-all ${
                       d.estado === "saldada"
                         ? "bg-zinc-500"
-                        : "bg-emerald-500"
+                        : "bg-gradient-to-r from-emerald-500 to-teal-400"
                     }`}
                     style={{ width: `${pct}%` }}
                   />
                 </div>
 
                 {d.notas && (
-                  <p className="mt-3 truncate text-sm text-zinc-400">{d.notas}</p>
+                  <p className="mt-3 truncate text-sm text-zinc-400">
+                    {d.notas}
+                  </p>
                 )}
 
-                <div className="mt-4 flex flex-wrap gap-2">
+                <div className="mt-4 flex flex-wrap items-center gap-1.5 border-t border-zinc-800/60 pt-3.5">
                   {d.estado !== "saldada" && (
                     <button
                       onClick={() => openAbono(d)}
-                      className="rounded-lg bg-emerald-500 px-3 py-1.5 text-sm font-medium text-zinc-950 hover:bg-emerald-400"
+                      className="rounded-lg bg-emerald-500 px-3.5 py-1.5 text-sm font-semibold text-zinc-950 transition-all hover:bg-emerald-400 active:scale-[.98]"
                     >
                       Abonar
                     </button>
                   )}
                   <button
                     onClick={() => void openVerAbonos(d)}
-                    className="rounded-lg bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 hover:bg-zinc-700"
+                    className={`${btnSecondary} !px-3.5 !py-1.5`}
                   >
                     Abonos
                   </button>
+                  <span className="flex-1" />
                   <button
                     onClick={() => openEditar(d)}
-                    className="rounded-lg px-3 py-1.5 text-sm text-zinc-400 hover:text-zinc-100"
+                    className={`${btnGhostSm} px-2`}
                   >
                     Editar
                   </button>
                   <button
                     onClick={() => void eliminar(d)}
-                    className="rounded-lg px-3 py-1.5 text-sm text-zinc-500 hover:text-red-300"
+                    className={`${btnDangerSm} px-2`}
                   >
                     Eliminar
                   </button>
@@ -405,17 +461,17 @@ export default function Deudas({ signalNueva }: { signalNueva: number }) {
           title={editing ? "Editar deuda" : "Nueva deuda"}
           onClose={() => setModalOpen(false)}
         >
-          <div className="space-y-3">
+          <div className="space-y-3.5">
             {!editing && (
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-2 rounded-xl bg-zinc-800/60 p-1">
                 {(["debo", "me_deben"] as DebtDirection[]).map((v) => (
                   <button
                     key={v}
                     onClick={() => setForm((f) => ({ ...f, direccion: v }))}
-                    className={`rounded-lg px-3 py-2 text-sm font-medium ${
+                    className={`rounded-lg px-3 py-2 text-sm font-semibold transition-all ${
                       form.direccion === v
-                        ? "bg-emerald-500 text-zinc-950"
-                        : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+                        ? "bg-emerald-500 text-zinc-950 shadow"
+                        : "text-zinc-400 hover:text-zinc-200"
                     }`}
                   >
                     {v === "debo" ? "Yo debo" : "Me deben"}
@@ -423,64 +479,88 @@ export default function Deudas({ signalNueva }: { signalNueva: number }) {
                 ))}
               </div>
             )}
-            <input
-              value={form.persona}
-              onChange={(e) => setForm((f) => ({ ...f, persona: e.target.value }))}
-              placeholder="Persona o negocio"
-              maxLength={120}
-              className={inputCls}
-            />
-            <div className="grid grid-cols-2 gap-2">
+            <Field label="Persona o negocio">
               <input
-                value={form.monto}
-                onChange={(e) => setForm((f) => ({ ...f, monto: e.target.value }))}
-                placeholder={editing ? "Nuevo total USD" : "Monto total USD"}
-                inputMode="decimal"
+                value={form.persona}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, persona: e.target.value }))
+                }
+                placeholder="Ej. Colmado Los Primos"
+                maxLength={120}
                 className={inputCls}
               />
-              <input
-                type="date"
-                value={form.fecha_limite}
+            </Field>
+            <div className="grid grid-cols-2 gap-2.5">
+              <Field label={editing ? "Nuevo total (USD)" : "Monto total (USD)"}>
+                <input
+                  value={form.monto}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, monto: e.target.value }))
+                  }
+                  placeholder="200.00"
+                  inputMode="decimal"
+                  className={`${inputCls} tnum`}
+                />
+              </Field>
+              <Field label="Fecha límite">
+                <input
+                  type="date"
+                  value={form.fecha_limite}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, fecha_limite: e.target.value }))
+                  }
+                  className={inputCls}
+                />
+              </Field>
+            </div>
+            <Field label="Contacto vinculado">
+              <select
+                value={form.contacto_id}
                 onChange={(e) =>
-                  setForm((f) => ({ ...f, fecha_limite: e.target.value }))
+                  setForm((f) => ({ ...f, contacto_id: e.target.value }))
                 }
                 className={inputCls}
+              >
+                <option value="">Sin contacto vinculado</option>
+                {contacts.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.nombre}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Notas">
+              <textarea
+                value={form.notas}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, notas: e.target.value }))
+                }
+                placeholder="Opcional"
+                rows={2}
+                maxLength={500}
+                className={inputCls}
               />
+            </Field>
+            {formError && <ErrorBox>{formError}</ErrorBox>}
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => setModalOpen(false)}
+                className={`${btnSecondary} flex-1`}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => void guardar()}
+                disabled={saving}
+                className={`${btnPrimary} flex-1`}
+              >
+                {saving
+                  ? "Guardando…"
+                  : editing
+                    ? "Guardar cambios"
+                    : "Agregar deuda"}
+              </button>
             </div>
-            <select
-              value={form.contacto_id}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, contacto_id: e.target.value }))
-              }
-              className={inputCls}
-            >
-              <option value="">Sin contacto vinculado</option>
-              {contacts.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.nombre}
-                </option>
-              ))}
-            </select>
-            <textarea
-              value={form.notas}
-              onChange={(e) => setForm((f) => ({ ...f, notas: e.target.value }))}
-              placeholder="Notas (opcional)"
-              rows={2}
-              maxLength={500}
-              className={inputCls}
-            />
-            {formError && <p className="text-sm text-red-300">{formError}</p>}
-            <button
-              onClick={() => void guardar()}
-              disabled={saving}
-              className="w-full rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400 disabled:opacity-50"
-            >
-              {saving
-                ? "Guardando…"
-                : editing
-                  ? "Guardar cambios"
-                  : "Agregar deuda"}
-            </button>
           </div>
         </Modal>
       )}
@@ -490,43 +570,57 @@ export default function Deudas({ signalNueva }: { signalNueva: number }) {
           title={`Abonar a ${abonoPara.persona}`}
           onClose={() => setAbonoPara(null)}
         >
-          <div className="space-y-3">
-            <p className="text-sm text-zinc-400">
-              Saldo restante:{" "}
-              <span className="font-medium text-zinc-100">
+          <div className="space-y-3.5">
+            <div className={`${cardCls} flex items-center justify-between p-3.5`}>
+              <span className="text-sm text-zinc-400">Saldo restante</span>
+              <span className="tnum text-xl font-semibold">
                 {fmtUSD(abonoPara.saldo_cents)}
               </span>
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              <input
-                value={abonoMonto}
-                onChange={(e) => setAbonoMonto(e.target.value)}
-                placeholder="Monto USD"
-                inputMode="decimal"
-                className={inputCls}
-              />
-              <input
-                type="date"
-                value={abonoFecha}
-                onChange={(e) => setAbonoFecha(e.target.value)}
-                className={inputCls}
-              />
             </div>
-            <input
-              value={abonoNota}
-              onChange={(e) => setAbonoNota(e.target.value)}
-              placeholder="Nota (opcional)"
-              maxLength={280}
-              className={inputCls}
-            />
-            {abonoError && <p className="text-sm text-red-300">{abonoError}</p>}
-            <button
-              onClick={() => void guardarAbono()}
-              disabled={saving}
-              className="w-full rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400 disabled:opacity-50"
-            >
-              {saving ? "Guardando…" : "Registrar abono"}
-            </button>
+            <div className="grid grid-cols-2 gap-2.5">
+              <Field label="Monto (USD)">
+                <input
+                  value={abonoMonto}
+                  onChange={(e) => setAbonoMonto(e.target.value)}
+                  placeholder="50.00"
+                  inputMode="decimal"
+                  className={`${inputCls} tnum`}
+                />
+              </Field>
+              <Field label="Fecha">
+                <input
+                  type="date"
+                  value={abonoFecha}
+                  onChange={(e) => setAbonoFecha(e.target.value)}
+                  className={inputCls}
+                />
+              </Field>
+            </div>
+            <Field label="Nota">
+              <input
+                value={abonoNota}
+                onChange={(e) => setAbonoNota(e.target.value)}
+                placeholder="Opcional"
+                maxLength={280}
+                className={inputCls}
+              />
+            </Field>
+            {abonoError && <ErrorBox>{abonoError}</ErrorBox>}
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => setAbonoPara(null)}
+                className={`${btnSecondary} flex-1`}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => void guardarAbono()}
+                disabled={saving}
+                className={`${btnPrimary} flex-1`}
+              >
+                {saving ? "Guardando…" : "Registrar abono"}
+              </button>
+            </div>
           </div>
         </Modal>
       )}
@@ -537,19 +631,25 @@ export default function Deudas({ signalNueva }: { signalNueva: number }) {
           onClose={() => setVerAbonos(null)}
         >
           {abonos.length === 0 ? (
-            <p className="text-sm text-zinc-500">Aún no hay abonos.</p>
+            <p className="py-2 text-center text-sm text-zinc-500">
+              Aún no hay abonos.
+            </p>
           ) : (
-            <div className="divide-y divide-zinc-800">
+            <div className="divide-y divide-zinc-800 overflow-hidden rounded-xl border border-zinc-800/60">
               {abonos.map((a) => (
                 <div
                   key={a.id}
-                  className="flex items-center justify-between py-2 text-sm"
+                  className="flex items-center justify-between px-3.5 py-2.5 text-sm"
                 >
-                  <div>
-                    <p>{a.nota || <span className="text-zinc-600">Abono</span>}</p>
-                    <p className="text-xs text-zinc-500">{fmtFecha(a.fecha)}</p>
+                  <div className="min-w-0">
+                    <p className="truncate">
+                      {a.nota || <span className="text-zinc-600">Abono</span>}
+                    </p>
+                    <p className="tnum text-xs text-zinc-500">
+                      {fmtFecha(a.fecha)}
+                    </p>
                   </div>
-                  <p className="font-medium text-emerald-300">
+                  <p className="tnum ml-3 font-semibold text-emerald-300">
                     {fmtUSD(a.monto_cents)}
                   </p>
                 </div>

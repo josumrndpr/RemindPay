@@ -1,7 +1,8 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+  --font-sans: "Inter", "Segoe UI Variable", "Segoe UI", system-ui,
+    -apple-system, "Helvetica Neue", sans-serif;
 }
 
 :root {
@@ -19,6 +20,22 @@ body {
   color: #fafafa;
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Números tabulares (montos alineados) */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+::selection {
+  background: rgb(16 185 129 / 0.35);
+}
+
+:focus-visible {
+  outline: 2px solid #10b981;
+  outline-offset: 2px;
+  border-radius: 6px;
 }
 
 /* Scrollbar delgado estilo Windows 11 */
@@ -36,6 +53,66 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #52525b;
+}
+
+/* ── Animaciones ── */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.anim-rise {
+  animation: rise 0.25s ease-out;
+}
+.anim-pop {
+  animation: pop 0.18s ease-out;
+}
+.anim-panel {
+  animation: slide-in 0.22s ease-out;
+}
+.anim-fade {
+  animation: fade 0.15s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .anim-rise,
+  .anim-pop,
+  .anim-panel,
+  .anim-fade {
+    animation: none;
+  }
 }
 
 /* ── Tema claro ─────────────────────────────
@@ -113,6 +190,9 @@ body {
 }
 .light [class*="text-amber-200"] {
   color: #92400e !important;
+}
+.light [class*="text-amber-300"] {
+  color: #b45309 !important;
 }
 .light [class*="bg-amber-950"] {
   background-color: #fef3c7 !important;

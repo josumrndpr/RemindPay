@@ -13,32 +13,7 @@ import {
   monthLocal,
 } from "../lib/format";
 import type { DebtsSummary, MonthSummary, Payment } from "../lib/types";
-
-function StatCard({
-  title,
-  value,
-  hint,
-  accent,
-}: {
-  title: string;
-  value: string;
-  hint: string;
-  accent?: boolean;
-}) {
-  return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-5">
-      <p className="text-sm text-zinc-400">{title}</p>
-      <p
-        className={`mt-1 text-3xl font-semibold tracking-tight ${
-          accent ? "text-emerald-300" : ""
-        }`}
-      >
-        {value}
-      </p>
-      <p className="mt-1 text-xs text-zinc-500">{hint}</p>
-    </div>
-  );
-}
+import { Icon, Stat, btnPrimary } from "./ui";
 
 export default function Dashboard({
   onNuevoPago,
@@ -85,53 +60,67 @@ export default function Dashboard({
 
   return (
     <div>
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight">Dashboard</h2>
-          <p className="mt-1 text-sm capitalize text-zinc-500">
+          <h2 className="text-[26px] font-bold tracking-tight">Dashboard</h2>
+          <p className="mt-0.5 text-sm capitalize text-zinc-500">
             {monthLabel(mes)}
           </p>
         </div>
         <div className="flex gap-2">
-          <input
-            type="month"
-            value={mes}
-            onChange={(e) => setMes(e.target.value)}
-            className="w-auto rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm outline-none focus:border-emerald-500"
-          />
-          <button
-            onClick={onNuevoPago}
-            className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400"
-          >
-            + Nuevo pago
+          <div className="relative">
+            <Icon
+              name="calendar"
+              size={15}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
+            />
+            <input
+              type="month"
+              value={mes}
+              onChange={(e) => setMes(e.target.value)}
+              aria-label="Mes"
+              className="rounded-xl border border-zinc-700/80 bg-zinc-800 py-2 pl-9 pr-3 text-sm outline-none transition-colors focus:border-emerald-500/70"
+            />
+          </div>
+          <button onClick={onNuevoPago} className={btnPrimary}>
+            <Icon name="plus" size={15} />
+            Nuevo pago
           </button>
         </div>
       </div>
 
       {error && (
-        <p className="mt-4 rounded-lg border border-red-900 bg-red-950/50 px-3 py-2 text-sm text-red-300">
+        <p className="mt-4 rounded-xl border border-red-900 bg-red-950/50 px-3 py-2.5 text-sm text-red-300">
           {error}
         </p>
       )}
 
-      <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3">
-        <StatCard
+      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <Stat
+          icon="trendingUp"
+          tone="green"
           title="Balance del mes"
           value={fmtUSD(summary?.balance_cents ?? 0)}
           hint={`${summary?.count ?? 0} movimientos`}
           accent
         />
-        <StatCard
+        <Stat
+          icon="download"
+          tone="green"
           title="Ingresos"
           value={fmtUSD(summary?.ingresos_cents ?? 0)}
           hint="entradas del mes"
         />
-        <StatCard
+        <Stat
+          icon="wallet"
+          tone="zinc"
           title="Gastos"
           value={fmtUSD(summary?.gastos_cents ?? 0)}
           hint="salidas del mes"
         />
-        <StatCard
+        <Stat
+          icon="bell"
+          tone={proximos.vencidos > 0 ? "red" : "amber"}
           title="Próximos 7 días"
           value={String(proximos.total)}
           hint={
@@ -140,34 +129,52 @@ export default function Dashboard({
               : "recordatorios pendientes"
           }
         />
-        <StatCard
+        <Stat
+          icon="users"
+          tone="green"
           title="Por cobrar"
           value={fmtUSD(debts?.por_cobrar_cents ?? 0)}
           hint="te deben"
         />
-        <StatCard
+        <Stat
+          icon="deudas"
+          tone="amber"
           title="Por pagar"
           value={fmtUSD(debts?.por_pagar_cents ?? 0)}
           hint={`yo debo · ${debts?.activas ?? 0} deudas vivas`}
         />
       </div>
 
-      <h3 className="mt-8 text-sm font-medium uppercase tracking-wide text-zinc-500">
-        Movimientos recientes
-      </h3>
-      <div className="mt-3 divide-y divide-zinc-800/60 rounded-xl border border-zinc-800">
+      <div className="mt-8 flex items-center justify-between">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+          Movimientos recientes
+        </h3>
+      </div>
+      <div className="mt-3 divide-y divide-zinc-800/60 overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-900/40">
         {recent.length === 0 ? (
-          <p className="px-4 py-6 text-center text-sm text-zinc-500">
+          <p className="px-4 py-8 text-center text-sm text-zinc-500">
             Aún no hay movimientos.
           </p>
         ) : (
           recent.map((p) => (
             <div
               key={p.id}
-              className="flex items-center justify-between px-4 py-2.5 text-sm"
+              className="flex items-center gap-3 px-4 py-3 text-sm transition-colors hover:bg-zinc-900/70"
             >
-              <div className="min-w-0">
-                <p className="truncate">
+              <span
+                className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ${
+                  p.tipo === "ingreso"
+                    ? "bg-emerald-500/15 text-emerald-300"
+                    : "bg-zinc-800 text-zinc-400"
+                }`}
+              >
+                <Icon
+                  name={p.tipo === "ingreso" ? "download" : "pagos"}
+                  size={16}
+                />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-medium">
                   {p.descripcion || (
                     <span className="text-zinc-600">Sin descripción</span>
                   )}
@@ -178,7 +185,7 @@ export default function Dashboard({
                 </p>
               </div>
               <p
-                className={`ml-4 whitespace-nowrap font-medium ${
+                className={`tnum whitespace-nowrap font-semibold ${
                   p.tipo === "ingreso" ? "text-emerald-300" : "text-zinc-100"
                 }`}
               >

@@ -7,9 +7,20 @@ import {
 } from "../lib/api";
 import type { Contact, NewContactInput } from "../lib/types";
 import Modal from "./Modal";
-
-const inputCls =
-  "w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 outline-none focus:border-emerald-500";
+import {
+  Empty,
+  ErrorBox,
+  Field,
+  Icon,
+  btnDangerSm,
+  btnGhostSm,
+  btnPrimary,
+  btnSecondary,
+  cardCls,
+  inputCls,
+  tableWrapCls,
+  thCls,
+} from "./ui";
 
 const EMPTY: NewContactInput = { nombre: "", telefono: "", nota: "" };
 
@@ -96,82 +107,105 @@ export default function Contactos() {
 
   return (
     <div>
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight">Contactos</h2>
-          <p className="mt-1 text-sm text-zinc-500">
-            Personas vinculadas a pagos y deudas
+          <h2 className="text-[26px] font-bold tracking-tight">Contactos</h2>
+          <p className="mt-0.5 text-sm text-zinc-500">
+            {items.length} personas vinculadas a pagos y deudas
           </p>
         </div>
-        <button
-          onClick={openNuevo}
-          className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400"
-        >
-          + Nuevo contacto
+        <button onClick={openNuevo} className={btnPrimary}>
+          <Icon name="plus" size={15} />
+          Nuevo contacto
         </button>
       </div>
 
-      <div className="mt-5">
-        <input
-          value={buscar}
-          onChange={(e) => setBuscar(e.target.value)}
-          placeholder="Buscar por nombre o teléfono…"
-          className={`${inputCls} max-w-xs`}
-        />
+      <div className={`${cardCls} mt-5 p-3`}>
+        <div className="relative max-w-xs">
+          <Icon
+            name="search"
+            size={15}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
+          />
+          <input
+            value={buscar}
+            onChange={(e) => setBuscar(e.target.value)}
+            placeholder="Buscar por nombre o teléfono…"
+            aria-label="Buscar"
+            className={`${inputCls} pl-9`}
+          />
+        </div>
       </div>
 
       {error && (
-        <p className="mt-4 rounded-lg border border-red-900 bg-red-950/50 px-3 py-2 text-sm text-red-300">
-          {error}
-        </p>
+        <div className="mt-4">
+          <ErrorBox>{error}</ErrorBox>
+        </div>
       )}
 
-      <div className="mt-4 overflow-x-auto rounded-xl border border-zinc-800">
-        <table className="w-full min-w-[560px] text-sm">
-          <thead>
-            <tr className="border-b border-zinc-800 text-left text-xs uppercase tracking-wide text-zinc-500">
-              <th className="px-4 py-3">Nombre</th>
-              <th className="px-4 py-3">Teléfono</th>
-              <th className="px-4 py-3">Nota</th>
-              <th className="px-4 py-3 text-right">Acciones</th>
+      <div className={`${tableWrapCls} mt-4`}>
+        <table className="w-full min-w-[600px] text-sm">
+          <thead className="sticky top-0 bg-zinc-900">
+            <tr className="border-b border-zinc-800">
+              <th className={thCls}>Nombre</th>
+              <th className={thCls}>Teléfono</th>
+              <th className={thCls}>Nota</th>
+              <th className={`${thCls} text-right`}>Acciones</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={4} className="px-4 py-8 text-center text-zinc-500">
-                  Cargando…
+                <td colSpan={4} className="px-4 py-10 text-center">
+                  <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-zinc-700 border-t-emerald-400" />
                 </td>
               </tr>
             ) : items.length === 0 ? (
               <tr>
-                <td colSpan={4} className="px-4 py-8 text-center text-zinc-500">
-                  Sin contactos.
+                <td colSpan={4}>
+                  <Empty
+                    icon="users"
+                    title="Sin contactos"
+                    hint="Agrega personas para vincularlas a pagos y deudas."
+                    action={
+                      <button onClick={openNuevo} className={btnSecondary}>
+                        <Icon name="plus" size={15} />
+                        Nuevo contacto
+                      </button>
+                    }
+                  />
                 </td>
               </tr>
             ) : (
               items.map((c) => (
                 <tr
                   key={c.id}
-                  className="border-b border-zinc-800/60 last:border-0 hover:bg-zinc-900/60"
+                  className="anim-fade border-b border-zinc-800/60 last:border-0 transition-colors hover:bg-zinc-900/70"
                 >
-                  <td className="px-4 py-2.5 font-medium">{c.nombre}</td>
-                  <td className="px-4 py-2.5 text-zinc-400">
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2.5">
+                      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-zinc-800 text-xs font-semibold text-zinc-300">
+                        {c.nombre.slice(0, 2).toUpperCase()}
+                      </span>
+                      <span className="font-medium">{c.nombre}</span>
+                    </div>
+                  </td>
+                  <td className="tnum px-4 py-3 text-zinc-400">
                     {c.telefono || "—"}
                   </td>
-                  <td className="max-w-[240px] truncate px-4 py-2.5 text-zinc-400">
+                  <td className="max-w-[240px] truncate px-4 py-3 text-zinc-400">
                     {c.nota || "—"}
                   </td>
-                  <td className="whitespace-nowrap px-4 py-2.5 text-right">
+                  <td className="whitespace-nowrap px-4 py-3 text-right">
                     <button
                       onClick={() => openEditar(c)}
-                      className="mr-3 text-zinc-400 hover:text-zinc-100"
+                      className={`${btnGhostSm} mr-3`}
                     >
                       Editar
                     </button>
                     <button
                       onClick={() => void eliminar(c)}
-                      className="text-zinc-500 hover:text-red-300"
+                      className={btnDangerSm}
                     >
                       Eliminar
                     </button>
@@ -188,43 +222,59 @@ export default function Contactos() {
           title={editing ? "Editar contacto" : "Nuevo contacto"}
           onClose={() => setModalOpen(false)}
         >
-          <div className="space-y-3">
-            <input
-              value={form.nombre}
-              onChange={(e) => setForm((f) => ({ ...f, nombre: e.target.value }))}
-              placeholder="Nombre"
-              maxLength={120}
-              className={inputCls}
-            />
-            <input
-              value={form.telefono}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, telefono: e.target.value }))
-              }
-              placeholder="Teléfono (opcional)"
-              maxLength={40}
-              className={inputCls}
-            />
-            <textarea
-              value={form.nota}
-              onChange={(e) => setForm((f) => ({ ...f, nota: e.target.value }))}
-              placeholder="Nota (opcional)"
-              rows={2}
-              maxLength={500}
-              className={inputCls}
-            />
-            {formError && <p className="text-sm text-red-300">{formError}</p>}
-            <button
-              onClick={() => void guardar()}
-              disabled={saving}
-              className="w-full rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-zinc-950 hover:bg-emerald-400 disabled:opacity-50"
-            >
-              {saving
-                ? "Guardando…"
-                : editing
-                  ? "Guardar cambios"
-                  : "Agregar contacto"}
-            </button>
+          <div className="space-y-3.5">
+            <Field label="Nombre">
+              <input
+                value={form.nombre}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, nombre: e.target.value }))
+                }
+                placeholder="Ej. Juan Pérez"
+                maxLength={120}
+                className={inputCls}
+              />
+            </Field>
+            <Field label="Teléfono">
+              <input
+                value={form.telefono}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, telefono: e.target.value }))
+                }
+                placeholder="Opcional"
+                maxLength={40}
+                className={inputCls}
+              />
+            </Field>
+            <Field label="Nota">
+              <textarea
+                value={form.nota}
+                onChange={(e) => setForm((f) => ({ ...f, nota: e.target.value }))}
+                placeholder="Opcional"
+                rows={2}
+                maxLength={500}
+                className={inputCls}
+              />
+            </Field>
+            {formError && <ErrorBox>{formError}</ErrorBox>}
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => setModalOpen(false)}
+                className={`${btnSecondary} flex-1`}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => void guardar()}
+                disabled={saving}
+                className={`${btnPrimary} flex-1`}
+              >
+                {saving
+                  ? "Guardando…"
+                  : editing
+                    ? "Guardar cambios"
+                    : "Agregar contacto"}
+              </button>
+            </div>
           </div>
         </Modal>
       )}
