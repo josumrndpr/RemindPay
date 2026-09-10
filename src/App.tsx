@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import Dashboard from "./components/Dashboard";
 import Pagos from "./components/Pagos";
-import { ping } from "./lib/api";
+import { isPreview, ping } from "./lib/api";
 import type { Section } from "./lib/types";
 
 const NAV: { id: Section; label: string; fase?: string }[] = [
@@ -104,6 +104,12 @@ export default function App() {
 
       {/* Contenido */}
       <main className="flex-1 overflow-y-auto p-8">
+        {isPreview() && (
+          <div className="mb-6 rounded-lg border border-amber-800 bg-amber-950/60 px-4 py-2.5 text-sm text-amber-200">
+            Vista previa web con datos de ejemplo (se borran al recargar). El
+            backend real SQLite se activa al compilar la app de escritorio.
+          </div>
+        )}
         {section === "dashboard" && <Dashboard onNuevoPago={nuevoPago} />}
         {section === "pagos" && <Pagos signalNuevo={signalNuevo} />}
         {section !== "dashboard" && section !== "pagos" && (
