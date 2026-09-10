@@ -62,9 +62,22 @@ export default function Titlebar() {
     }
   }
 
+  // Arrastre manual: más fiable que solo el atributo en Windows.
+  async function empezarArrastre(e: React.MouseEvent) {
+    if (e.button !== 0) return;
+    if ((e.target as HTMLElement).closest("button")) return;
+    try {
+      if (await win().isMaximized()) return;
+      await win().startDragging();
+    } catch {
+      /* sin ventana nativa */
+    }
+  }
+
   return (
     <div
       data-tauri-drag-region
+      onMouseDown={(e) => void empezarArrastre(e)}
       onDoubleClick={() => void toggleMax()}
       className="flex h-10 shrink-0 select-none items-center gap-2 border-b border-zinc-800/80 bg-zinc-900/70 py-1 pl-3 pr-1.5"
     >

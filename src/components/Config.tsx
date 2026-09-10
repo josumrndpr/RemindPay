@@ -404,7 +404,7 @@ export default function Config() {
         )}
 
         <div className="flex items-center gap-3 px-1 py-2 text-xs text-zinc-600">
-          <span>RemindPay 0.1.0 · 100% local · SQLite · USD</span>
+          <span>RemindPay 0.1.1 · 100% local · SQLite · USD</span>
         </div>
       </div>
     </div>
