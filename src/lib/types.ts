@@ -1,0 +1,80 @@
+// RemindPay — tipos compartidos (montos en centavos USD: 1999 = $19.99)
+
+export type Money = number;
+
+export type PaymentType = "ingreso" | "gasto";
+export type Recurrence = "none" | "daily" | "weekly" | "monthly";
+
+export interface Category {
+  id: number;
+  nombre: string;
+  color: string;
+  tipo: PaymentType | "ambos";
+}
+
+export interface Contact {
+  id: number;
+  nombre: string;
+  telefono: string;
+  nota: string;
+  created_at: string;
+}
+
+export interface Payment {
+  id: number;
+  tipo: PaymentType;
+  monto_cents: Money;
+  fecha: string; // ISO yyyy-MM-dd
+  categoria_id: number | null;
+  descripcion: string;
+  contacto_id: number | null;
+  comprobante_path: string;
+  recurrente: Recurrence;
+  created_at: string;
+}
+
+export type DebtDirection = "debo" | "me_deben";
+export type DebtStatus = "activa" | "saldada" | "vencida";
+
+export interface Debt {
+  id: number;
+  direccion: DebtDirection;
+  persona: string;
+  contacto_id: number | null;
+  monto_total_cents: Money;
+  saldo_cents: Money;
+  fecha_limite: string;
+  estado: DebtStatus;
+  notas: string;
+  created_at: string;
+}
+
+export interface DebtPayment {
+  id: number;
+  debt_id: number;
+  monto_cents: Money;
+  fecha: string;
+  nota: string;
+}
+
+export interface Reminder {
+  id: number;
+  titulo: string;
+  detalle: string;
+  fecha_hora: string; // ISO datetime
+  repetir: Recurrence;
+  payment_id: number | null;
+  debt_id: number | null;
+  sonido: boolean;
+  persistente: boolean;
+  hecho: boolean;
+  created_at: string;
+}
+
+export type Section =
+  | "dashboard"
+  | "pagos"
+  | "deudas"
+  | "recordatorios"
+  | "contactos"
+  | "config";
