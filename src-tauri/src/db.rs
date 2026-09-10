@@ -5,7 +5,8 @@
 
 use crate::models::{
     Category, Contact, Debt, DebtFilter, DebtPayment, DebtsSummary, EditDebt, MonthSummary,
-    NewContact, NewDebt, NewDebtPayment, NewPayment, Payment, PaymentFilter,
+    NewContact, NewDebt, NewDebtPayment, NewPayment, NewReminder, Payment, PaymentFilter, Reminder,
+    ReminderFilter,
 };
 use rusqlite::{params, Connection, Row};
 
@@ -594,6 +595,189 @@ pub fn query_contacts(conn: &Connection, buscar: Option<String>) -> Result<Vec<C
     Ok(out)
 }
 
+// ── Recordatorios ────────────────────────────────────────────────────────
+
+fn row_to_reminder(row: &Row) -> rusqlite::Result<Reminder> {
+    Ok(Reminder {
+        id: row.get(0)?,
+        titulo: row.get(1)?,
+        detalle: row.get(2)?,
+        fecha_hora: row.get(3)?,
+        repetir: row.get(4)?,
+        payment_id: row.get(5)?,
+        debt_id: row.get(6)?,
+        sonido: row.get(7)?,
+        persistente: row.get(8)?,
+        hecho: row.get(9)?,
+        created_at: row.get(10)?,
+    })
+}
+
+fn fecha_hora_valida(fh: &str) -> bool {
+    fh.len() == 16 && fh.as_bytes()[4] == b'-' && fh.as_bytes()[10] == b'T'
+}
+
+pub fn validate_reminder(input: &NewReminder) -> Result<(), String> {
+    let titulo = input.titulo.trim();
+    if titulo.is_empty() {
+        return Err("falta el título".into());
+    }
+    if titulo.len() > 140 {
+        return Err("título muy largo (máx 140)".into());
+    }
+    if !fecha_hora_valida(&input.fecha_hora) {
+        return Err("fecha/hora inválida".into());
+    }
+    match input.repetir.as_str() {
+        "none" | "daily" | "weekly" | "monthly" => {}
+        _ => return Err("repetición inválida".into()),
+    }
+    if input.detalle.trim().len() > 500 {
+        return Err("detalle muy largo (máx 500)".into());
+    }
+    Ok(())
+}
+
+const REMINDER_SELECT: &str = "SELECT id, titulo, detalle, fecha_hora, repetir, payment_id, debt_id, sonido, persistente, hecho, created_at FROM reminders";
+
+fn get_reminder_row(conn: &Connection, id: i64) -> Result<Reminder, String> {
+    conn.query_row(
+        &format!("{REMINDER_SELECT} WHERE id = ?1"),
+        params![id],
+        row_to_reminder,
+    )
+    .map_err(|e| format!("recordatorio no encontrado: {e}"))
+}
+
+pub fn insert_reminder(conn: &Connection, input: &NewReminder) -> Result<Reminder, String> {
+    validate_reminder(input)?;
+    conn.execute(
+        "INSERT INTO reminders (titulo, detalle, fecha_hora, repetir, payment_id, debt_id, sonido, persistente) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            input.titulo.trim(),
+            input.detalle.trim(),
+            input.fecha_hora,
+            input.repetir,
+            input.payment_id,
+            input.debt_id,
+            input.sonido,
+            input.persistente
+        ],
+    )
+    .map_err(|e| format!("insert: {e}"))?;
+    get_reminder_row(conn, conn.last_insert_rowid())
+}
+
+pub fn update_reminder(
+    conn: &Connection,
+    id: i64,
+    input: &NewReminder,
+) -> Result<Reminder, String> {
+    validate_reminder(input)?;
+    let rows = conn
+        .execute(
+            "UPDATE reminders SET titulo = ?1, detalle = ?2, fecha_hora = ?3, repetir = ?4, payment_id = ?5, debt_id = ?6, sonido = ?7, persistente = ?8 WHERE id = ?9",
+            params![
+                input.titulo.trim(),
+                input.detalle.trim(),
+                input.fecha_hora,
+                input.repetir,
+                input.payment_id,
+                input.debt_id,
+                input.sonido,
+                input.persistente,
+                id
+            ],
+        )
+        .map_err(|e| format!("update: {e}"))?;
+    if rows == 0 {
+        return Err("recordatorio no encontrado".into());
+    }
+    get_reminder_row(conn, id)
+}
+
+pub fn delete_reminder(conn: &Connection, id: i64) -> Result<(), String> {
+    let rows = conn
+        .execute("DELETE FROM reminders WHERE id = ?1", params![id])
+        .map_err(|e| format!("delete: {e}"))?;
+    if rows == 0 {
+        return Err("recordatorio no encontrado".into());
+    }
+    Ok(())
+}
+
+pub fn set_reminder_done(conn: &Connection, id: i64, hecho: bool) -> Result<Reminder, String> {
+    let rows = conn
+        .execute(
+            "UPDATE reminders SET hecho = ?1 WHERE id = ?2",
+            params![hecho, id],
+        )
+        .map_err(|e| format!("update: {e}"))?;
+    if rows == 0 {
+        return Err("recordatorio no encontrado".into());
+    }
+    get_reminder_row(conn, id)
+}
+
+pub fn query_reminders(conn: &Connection, f: &ReminderFilter) -> Result<Vec<Reminder>, String> {
+    let mut sql = String::from(REMINDER_SELECT);
+    sql.push_str(" WHERE 1 = 1");
+    let mut args: Vec<String> = Vec::new();
+    if f.solo_pendientes == Some(true) {
+        sql.push_str(" AND hecho = 0");
+    }
+    if let Some(d) = &f.desde {
+        if d.len() >= 10 {
+            sql.push_str(" AND fecha_hora >= ?");
+            args.push(d.clone());
+        }
+    }
+    if let Some(h) = &f.hasta {
+        if h.len() >= 10 {
+            sql.push_str(" AND fecha_hora <= ?");
+            args.push(h.clone());
+        }
+    }
+    if let Some(b) = &f.buscar {
+        let q = b.trim();
+        if !q.is_empty() {
+            sql.push_str(" AND (titulo LIKE '%' || ? || '%' OR detalle LIKE '%' || ? || '%')");
+            args.push(q.to_string());
+            args.push(q.to_string());
+        }
+    }
+    sql.push_str(" ORDER BY hecho ASC, fecha_hora ASC, id DESC LIMIT ?");
+    args.push(f.limite.clamp(1, 2000).to_string());
+
+    let mut stmt = conn.prepare(&sql).map_err(|e| format!("prepare: {e}"))?;
+    let refs: Vec<&dyn rusqlite::ToSql> = args.iter().map(|a| a as &dyn rusqlite::ToSql).collect();
+    let rows = stmt
+        .query_map(refs.as_slice(), row_to_reminder)
+        .map_err(|e| format!("query: {e}"))?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(|e| format!("row: {e}"))?);
+    }
+    Ok(out)
+}
+
+/// Pendientes cuya hora ya llegó (lo que revisa el frontend cada 60s).
+pub fn due_reminders(conn: &Connection, ahora: &str) -> Result<Vec<Reminder>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "{REMINDER_SELECT} WHERE hecho = 0 AND fecha_hora <= ?1 ORDER BY fecha_hora ASC LIMIT 50"
+        ))
+        .map_err(|e| format!("prepare: {e}"))?;
+    let rows = stmt
+        .query_map(params![ahora], row_to_reminder)
+        .map_err(|e| format!("query: {e}"))?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(|e| format!("row: {e}"))?);
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -768,5 +952,63 @@ mod tests {
         s.persona = "Juan".into();
         s.monto_total = 0.0;
         assert!(insert_debt(&conn, &s, "2026-09-10").is_err());
+    }
+
+    fn reminder_sample(titulo: &str, fh: &str) -> NewReminder {
+        NewReminder {
+            titulo: titulo.into(),
+            detalle: "".into(),
+            fecha_hora: fh.into(),
+            repetir: "none".into(),
+            payment_id: None,
+            debt_id: None,
+            sonido: true,
+            persistente: true,
+        }
+    }
+
+    #[test]
+    fn crud_recordatorio() {
+        let conn = mem();
+        let r = insert_reminder(&conn, &reminder_sample("Pagar luz", "2026-09-15T10:00")).unwrap();
+        assert!(!r.hecho);
+        let d = set_reminder_done(&conn, r.id, true).unwrap();
+        assert!(d.hecho);
+        let d2 = set_reminder_done(&conn, r.id, false).unwrap();
+        assert!(!d2.hecho);
+        delete_reminder(&conn, r.id).unwrap();
+        let f = ReminderFilter {
+            limite: 100,
+            ..Default::default()
+        };
+        assert!(query_reminders(&conn, &f).unwrap().is_empty());
+    }
+
+    #[test]
+    fn vencidos_query() {
+        let conn = mem();
+        insert_reminder(&conn, &reminder_sample("Pasado", "2026-09-09T10:00")).unwrap();
+        insert_reminder(&conn, &reminder_sample("Futuro", "2026-09-20T10:00")).unwrap();
+        let h = insert_reminder(&conn, &reminder_sample("Hecho", "2026-09-01T10:00")).unwrap();
+        set_reminder_done(&conn, h.id, true).unwrap();
+        let due = due_reminders(&conn, "2026-09-10T12:00").unwrap();
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].titulo, "Pasado");
+        let pend = ReminderFilter {
+            solo_pendientes: Some(true),
+            limite: 100,
+            ..Default::default()
+        };
+        assert_eq!(query_reminders(&conn, &pend).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn recordatorio_rechaza_basura() {
+        let conn = mem();
+        assert!(insert_reminder(&conn, &reminder_sample("  ", "2026-09-15T10:00")).is_err());
+        assert!(insert_reminder(&conn, &reminder_sample("X", "mañana")).is_err());
+        let mut r = reminder_sample("X", "2026-09-15T10:00");
+        r.repetir = "anual".into();
+        assert!(insert_reminder(&conn, &r).is_err());
     }
 }

@@ -1,4 +1,4 @@
-//! RemindPay — modelos de datos (Fase 1: pagos · Fase 2: deudas + contactos).
+//! RemindPay — modelos (Fase 1: pagos · Fase 2: deudas + contactos · Fase 3: recordatorios).
 
 use serde::{Deserialize, Serialize};
 
@@ -133,4 +133,40 @@ pub struct NewContact {
     pub nombre: String,
     pub telefono: String,
     pub nota: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Reminder {
+    pub id: i64,
+    pub titulo: String,
+    pub detalle: String,
+    pub fecha_hora: String,
+    pub repetir: String,
+    pub payment_id: Option<i64>,
+    pub debt_id: Option<i64>,
+    pub sonido: bool,
+    pub persistente: bool,
+    pub hecho: bool,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct NewReminder {
+    pub titulo: String,
+    pub detalle: String,
+    pub fecha_hora: String,
+    pub repetir: String,
+    pub payment_id: Option<i64>,
+    pub debt_id: Option<i64>,
+    pub sonido: bool,
+    pub persistente: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ReminderFilter {
+    pub desde: Option<String>,
+    pub hasta: Option<String>,
+    pub solo_pendientes: Option<bool>,
+    pub buscar: Option<String>,
+    pub limite: i64,
 }

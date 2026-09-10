@@ -1,26 +1,41 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import Config from "./components/Config";
 import Contactos from "./components/Contactos";
 import Dashboard from "./components/Dashboard";
 import Deudas from "./components/Deudas";
+import DuePanel from "./components/DuePanel";
 import Pagos from "./components/Pagos";
-import { isPreview, ping } from "./lib/api";
-import type { Section } from "./lib/types";
+import Recordatorios from "./components/Recordatorios";
+import {
+  dueReminders,
+  isPreview,
+  ping,
+  updateReminder,
+} from "./lib/api";
+import { ahoraLocal, sumarMinutos } from "./lib/format";
+import { avisar } from "./lib/notify";
+import { completarRecordatorio } from "./lib/recordatorios";
+import { beep } from "./lib/sound";
+import type { Reminder, Section } from "./lib/types";
 
 const NAV: { id: Section; label: string; fase?: string }[] = [
   { id: "dashboard", label: "Dashboard" },
   { id: "pagos", label: "Pagos" },
   { id: "deudas", label: "Deudas" },
+  { id: "recordatorios", label: "Recordatorios" },
   { id: "contactos", label: "Contactos" },
-  { id: "recordatorios", label: "Recordatorios", fase: "Fase 3" },
-  { id: "config", label: "Configuración", fase: "Fase 4" },
+  { id: "config", label: "Configuración" },
 ];
 
 export default function App() {
   const [section, setSection] = useState<Section>("dashboard");
   const [signalNuevo, setSignalNuevo] = useState(0);
   const [signalDeuda, setSignalDeuda] = useState(0);
+  const [signalRec, setSignalRec] = useState(0);
   const [bridge, setBridge] = useState<string | null>(null);
   const [bridgeMs, setBridgeMs] = useState<number | null>(null);
+  const [dueItems, setDueItems] = useState<Reminder[]>([]);
+  const notifiedRef = useRef<Set<number>>(new Set());
 
   function nuevoPago() {
     setSection("pagos");
@@ -32,6 +47,43 @@ export default function App() {
     setSignalDeuda((s) => s + 1);
   }
 
+  function nuevoRecordatorio() {
+    setSection("recordatorios");
+    setSignalRec((s) => s + 1);
+  }
+
+  // Revisa vencidos: notificación nativa + sonido + panel persistente.
+  const revisar = useCallback(async (conSonido: boolean) => {
+    try {
+      const due = await dueReminders(ahoraLocal());
+      const nuevos = due.filter((d) => !notifiedRef.current.has(d.id));
+      if (nuevos.length > 0) {
+        nuevos.forEach((d) => notifiedRef.current.add(d.id));
+        if (conSonido && nuevos.some((d) => d.sonido)) beep(3);
+        await avisar(
+          "RemindPay",
+          nuevos.length === 1
+            ? nuevos[0].titulo
+            : `${nuevos.length} recordatorios vencidos`,
+        );
+      }
+      setDueItems(due.filter((d) => d.persistente));
+    } catch {
+      /* revisión silenciosa */
+    }
+  }, []);
+
+  useEffect(() => {
+    void revisar(false);
+    const t = setInterval(() => void revisar(true), 60000);
+    const onFocus = () => void revisar(true);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [revisar]);
+
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
@@ -39,12 +91,50 @@ export default function App() {
       const k = e.key.toLowerCase();
       if (k === "n") nuevoPago();
       else if (k === "d") nuevaDeuda();
-      else if (k === "r") setSection("recordatorios");
+      else if (k === "r") nuevoRecordatorio();
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function hechoDue(id: number) {
+    const r = dueItems.find((x) => x.id === id);
+    if (!r) return;
+    try {
+      await completarRecordatorio(r);
+      notifiedRef.current.delete(id);
+      await revisar(false);
+    } catch {
+      /* el error se ve en el módulo */
+    }
+  }
+
+  async function posponerDue(id: number) {
+    const r = dueItems.find((x) => x.id === id);
+    if (!r) return;
+    try {
+      await updateReminder(id, {
+        titulo: r.titulo,
+        detalle: r.detalle,
+        fecha_hora: sumarMinutos(ahoraLocal(), 10),
+        repetir: r.repetir,
+        payment_id: r.payment_id,
+        debt_id: r.debt_id,
+        sonido: r.sonido,
+        persistente: r.persistente,
+      });
+      await revisar(false);
+    } catch {
+      /* el error se ve en el módulo */
+    }
+  }
+
+  function verDue(r: Reminder) {
+    if (r.debt_id != null) setSection("deudas");
+    else if (r.payment_id != null) setSection("pagos");
+    else setSection("recordatorios");
+  }
 
   async function testBridge() {
     const t0 = performance.now();
@@ -121,20 +211,22 @@ export default function App() {
         {section === "dashboard" && <Dashboard onNuevoPago={nuevoPago} />}
         {section === "pagos" && <Pagos signalNuevo={signalNuevo} />}
         {section === "deudas" && <Deudas signalNueva={signalDeuda} />}
-        {section === "contactos" && <Contactos />}
-        {(section === "recordatorios" || section === "config") && (
-          <div className="flex h-full flex-col items-center justify-center text-center">
-            <h2 className="text-2xl font-semibold capitalize tracking-tight">
-              {NAV.find((n) => n.id === section)?.label}
-            </h2>
-            <p className="mt-2 max-w-sm text-sm text-zinc-500">
-              Este módulo se construye en{" "}
-              {NAV.find((n) => n.id === section)?.fase}. La base (tipos y
-              esquema SQLite) ya está lista en PLAN.md y schema.sql.
-            </p>
-          </div>
+        {section === "recordatorios" && (
+          <Recordatorios
+            signalNuevo={signalRec}
+            onChanged={() => void revisar(false)}
+          />
         )}
+        {section === "contactos" && <Contactos />}
+        {section === "config" && <Config />}
       </main>
+
+      <DuePanel
+        items={dueItems}
+        onHecho={(id) => void hechoDue(id)}
+        onPosponer={(id) => void posponerDue(id)}
+        onVer={verDue}
+      />
     </div>
   );
 }

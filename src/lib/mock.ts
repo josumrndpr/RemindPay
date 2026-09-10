@@ -14,7 +14,9 @@ import type {
   NewDebtInput,
   NewDebtPaymentInput,
   NewPaymentInput,
+  NewReminderInput,
   Payment,
+  Reminder,
 } from "./types";
 
 const MES = todayLocal().slice(0, 7);
@@ -460,4 +462,137 @@ export async function deleteContact(id: number): Promise<void> {
       d.contacto_id = null;
       d.contacto = null;
     }
+}
+
+// ── Recordatorios ──
+
+let remSeq = 10;
+const rems: Reminder[] = [
+  {
+    id: 1,
+    titulo: "Pagar tarjeta (ejemplo)",
+    detalle: "Corte el 15",
+    fecha_hora: `${MES}-15T09:00`,
+    repetir: "monthly",
+    payment_id: null,
+    debt_id: null,
+    sonido: true,
+    persistente: true,
+    hecho: false,
+    created_at: `${MES}-01T10:00:00`,
+  },
+];
+
+function validarReminder(input: NewReminderInput): void {
+  if (!input.titulo.trim()) throw new Error("falta el título");
+  if (input.titulo.trim().length > 140)
+    throw new Error("título muy largo (máx 140)");
+  if (
+    input.fecha_hora.length !== 16 ||
+    input.fecha_hora[4] !== "-" ||
+    input.fecha_hora[10] !== "T"
+  )
+    throw new Error("fecha/hora inválida");
+  if (!["none", "daily", "weekly", "monthly"].includes(input.repetir))
+    throw new Error("repetición inválida");
+  if (input.detalle.trim().length > 500)
+    throw new Error("detalle muy largo (máx 500)");
+}
+
+export async function listReminders(f: {
+  desde?: string;
+  hasta?: string;
+  solo_pendientes?: boolean;
+  buscar?: string;
+  limite?: number;
+}): Promise<Reminder[]> {
+  let out = [...rems];
+  if (f.solo_pendientes) out = out.filter((r) => !r.hecho);
+  if (f.desde && f.desde.length >= 10)
+    out = out.filter((r) => r.fecha_hora >= (f.desde as string));
+  if (f.hasta && f.hasta.length >= 10)
+    out = out.filter((r) => r.fecha_hora <= (f.hasta as string));
+  const q = (f.buscar ?? "").trim().toLowerCase();
+  if (q)
+    out = out.filter(
+      (r) =>
+        r.titulo.toLowerCase().includes(q) ||
+        r.detalle.toLowerCase().includes(q),
+    );
+  out.sort((a, b) => {
+    if (a.hecho !== b.hecho) return a.hecho ? 1 : -1;
+    if (a.fecha_hora !== b.fecha_hora)
+      return a.fecha_hora.localeCompare(b.fecha_hora);
+    return b.id - a.id;
+  });
+  return out.slice(0, Math.min(Math.max(f.limite ?? 200, 1), 2000));
+}
+
+export async function createReminder(input: NewReminderInput): Promise<Reminder> {
+  validarReminder(input);
+  const r: Reminder = {
+    id: remSeq++,
+    titulo: input.titulo.trim(),
+    detalle: input.detalle.trim(),
+    fecha_hora: input.fecha_hora,
+    repetir: input.repetir,
+    payment_id: input.payment_id,
+    debt_id: input.debt_id,
+    sonido: input.sonido,
+    persistente: input.persistente,
+    hecho: false,
+    created_at: new Date().toISOString(),
+  };
+  rems.push(r);
+  return r;
+}
+
+export async function updateReminder(
+  id: number,
+  input: NewReminderInput,
+): Promise<Reminder> {
+  validarReminder(input);
+  const r = rems.find((x) => x.id === id);
+  if (!r) throw new Error("recordatorio no encontrado");
+  r.titulo = input.titulo.trim();
+  r.detalle = input.detalle.trim();
+  r.fecha_hora = input.fecha_hora;
+  r.repetir = input.repetir;
+  r.payment_id = input.payment_id;
+  r.debt_id = input.debt_id;
+  r.sonido = input.sonido;
+  r.persistente = input.persistente;
+  return r;
+}
+
+export async function deleteReminder(id: number): Promise<void> {
+  const i = rems.findIndex((x) => x.id === id);
+  if (i < 0) throw new Error("recordatorio no encontrado");
+  rems.splice(i, 1);
+}
+
+export async function setReminderDone(id: number, hecho: boolean): Promise<Reminder> {
+  const r = rems.find((x) => x.id === id);
+  if (!r) throw new Error("recordatorio no encontrado");
+  r.hecho = hecho;
+  return r;
+}
+
+export async function dueReminders(ahora: string): Promise<Reminder[]> {
+  return rems
+    .filter((r) => !r.hecho && r.fecha_hora <= ahora)
+    .sort((a, b) => a.fecha_hora.localeCompare(b.fecha_hora))
+    .slice(0, 50);
+}
+
+// ── Sistema (vista previa) ──
+
+let mockAutostart = false;
+
+export async function isAutostart(): Promise<boolean> {
+  return mockAutostart;
+}
+
+export async function setAutostart(enable: boolean): Promise<void> {
+  mockAutostart = enable;
 }

@@ -3,11 +3,13 @@
 use crate::db;
 use crate::models::{
     Category, Contact, Debt, DebtFilter, DebtPayment, DebtsSummary, EditDebt, MonthSummary,
-    NewContact, NewDebt, NewDebtPayment, NewPayment, Payment, PaymentFilter,
+    NewContact, NewDebt, NewDebtPayment, NewPayment, NewReminder, Payment, PaymentFilter, Reminder,
+    ReminderFilter,
 };
 use rusqlite::Connection;
 use std::sync::Mutex;
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
+use tauri_plugin_autostart::ManagerExt;
 
 // ── Pagos ──
 
@@ -182,4 +184,100 @@ pub fn update_contact(
 pub fn delete_contact(state: State<'_, Mutex<Connection>>, id: i64) -> Result<(), String> {
     let conn = state.lock().map_err(|e| format!("db bloqueada: {e}"))?;
     db::delete_contact(&conn, id)
+}
+
+// ── Recordatorios ──
+
+#[tauri::command]
+pub fn list_reminders(
+    state: State<'_, Mutex<Connection>>,
+    desde: Option<String>,
+    hasta: Option<String>,
+    solo_pendientes: Option<bool>,
+    buscar: Option<String>,
+    limite: Option<i64>,
+) -> Result<Vec<Reminder>, String> {
+    let conn = state.lock().map_err(|e| format!("db bloqueada: {e}"))?;
+    db::query_reminders(
+        &conn,
+        &ReminderFilter {
+            desde,
+            hasta,
+            solo_pendientes,
+            buscar,
+            limite: limite.unwrap_or(200),
+        },
+    )
+}
+
+#[tauri::command]
+pub fn create_reminder(
+    state: State<'_, Mutex<Connection>>,
+    input: NewReminder,
+) -> Result<Reminder, String> {
+    let conn = state.lock().map_err(|e| format!("db bloqueada: {e}"))?;
+    db::insert_reminder(&conn, &input)
+}
+
+#[tauri::command]
+pub fn update_reminder(
+    state: State<'_, Mutex<Connection>>,
+    id: i64,
+    input: NewReminder,
+) -> Result<Reminder, String> {
+    let conn = state.lock().map_err(|e| format!("db bloqueada: {e}"))?;
+    db::update_reminder(&conn, id, &input)
+}
+
+#[tauri::command]
+pub fn delete_reminder(state: State<'_, Mutex<Connection>>, id: i64) -> Result<(), String> {
+    let conn = state.lock().map_err(|e| format!("db bloqueada: {e}"))?;
+    db::delete_reminder(&conn, id)
+}
+
+#[tauri::command]
+pub fn set_reminder_done(
+    state: State<'_, Mutex<Connection>>,
+    id: i64,
+    hecho: bool,
+) -> Result<Reminder, String> {
+    let conn = state.lock().map_err(|e| format!("db bloqueada: {e}"))?;
+    db::set_reminder_done(&conn, id, hecho)
+}
+
+#[tauri::command]
+pub fn due_reminders(
+    state: State<'_, Mutex<Connection>>,
+    ahora: String,
+) -> Result<Vec<Reminder>, String> {
+    let conn = state.lock().map_err(|e| format!("db bloqueada: {e}"))?;
+    db::due_reminders(&conn, &ahora)
+}
+
+// ── Sistema ──
+
+#[tauri::command]
+pub fn data_dir(app: AppHandle) -> Result<String, String> {
+    app.path()
+        .app_data_dir()
+        .map(|p| p.to_string_lossy().into_owned())
+        .map_err(|e| format!("app_data_dir: {e}"))
+}
+
+#[tauri::command]
+pub fn is_autostart(app: AppHandle) -> Result<bool, String> {
+    app.autolaunch()
+        .is_enabled()
+        .map_err(|e| format!("autostart: {e}"))
+}
+
+#[tauri::command]
+pub fn set_autostart(app: AppHandle, enable: bool) -> Result<(), String> {
+    let launcher = app.autolaunch();
+    if enable {
+        launcher.enable()
+    } else {
+        launcher.disable()
+    }
+    .map_err(|e| format!("autostart: {e}"))
 }

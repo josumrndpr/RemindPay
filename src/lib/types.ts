@@ -116,7 +116,7 @@ export interface Reminder {
   id: number;
   titulo: string;
   detalle: string;
-  fecha_hora: string;
+  fecha_hora: string; // yyyy-MM-ddTHH:mm
   repetir: Recurrence;
   payment_id: number | null;
   debt_id: number | null;
@@ -124,6 +124,17 @@ export interface Reminder {
   persistente: boolean;
   hecho: boolean;
   created_at: string;
+}
+
+export interface NewReminderInput {
+  titulo: string;
+  detalle: string;
+  fecha_hora: string;
+  repetir: Recurrence;
+  payment_id: number | null;
+  debt_id: number | null;
+  sonido: boolean;
+  persistente: boolean;
 }
 
 export type Section =

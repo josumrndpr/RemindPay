@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
-import { debtsSummary, listPayments, paymentsSummary } from "../lib/api";
-import { fmtFecha, fmtUSD, monthLabel, monthLocal } from "../lib/format";
+import {
+  debtsSummary,
+  listPayments,
+  listReminders,
+  paymentsSummary,
+} from "../lib/api";
+import {
+  ahoraLocal,
+  fmtFecha,
+  fmtUSD,
+  monthLabel,
+  monthLocal,
+} from "../lib/format";
 import type { DebtsSummary, MonthSummary, Payment } from "../lib/types";
 
 function StatCard({
@@ -37,20 +48,32 @@ export default function Dashboard({
   const [mes, setMes] = useState(monthLocal());
   const [summary, setSummary] = useState<MonthSummary | null>(null);
   const [debts, setDebts] = useState<DebtsSummary | null>(null);
+  const [proximos, setProximos] = useState({ total: 0, vencidos: 0 });
   const [recent, setRecent] = useState<Payment[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [s, d, r] = await Promise.all([
+      const [s, d, r, rems] = await Promise.all([
         paymentsSummary(mes),
         debtsSummary(),
         listPayments({ limite: 8 }),
+        listReminders({ solo_pendientes: true, limite: 500 }),
       ]);
       setSummary(s);
       setDebts(d);
       setRecent(r);
+      const ahora = ahoraLocal();
+      const max = new Date();
+      max.setDate(max.getDate() + 7);
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const tope = `${max.getFullYear()}-${pad(max.getMonth() + 1)}-${pad(max.getDate())}T23:59`;
+      const prox = rems.filter((x) => x.fecha_hora <= tope);
+      setProximos({
+        total: prox.length,
+        vencidos: prox.filter((x) => x.fecha_hora <= ahora).length,
+      });
     } catch (e) {
       setError(String(e));
     }
@@ -108,9 +131,15 @@ export default function Dashboard({
           value={fmtUSD(summary?.gastos_cents ?? 0)}
           hint="salidas del mes"
         />
-      </div>
-
-      <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+        <StatCard
+          title="Próximos 7 días"
+          value={String(proximos.total)}
+          hint={
+            proximos.vencidos > 0
+              ? `${proximos.vencidos} vencidos`
+              : "recordatorios pendientes"
+          }
+        />
         <StatCard
           title="Por cobrar"
           value={fmtUSD(debts?.por_cobrar_cents ?? 0)}

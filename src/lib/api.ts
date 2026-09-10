@@ -15,7 +15,9 @@ import type {
   NewDebtInput,
   NewDebtPaymentInput,
   NewPaymentInput,
+  NewReminderInput,
   Payment,
+  Reminder,
 } from "./types";
 
 /** true cuando corre en navegador sin backend Rust (vista previa). */
@@ -152,4 +154,68 @@ export function updateContact(
 export function deleteContact(id: number): Promise<void> {
   if (isPreview()) return mock.deleteContact(id);
   return invoke<void>("delete_contact", { id });
+}
+
+// ── Recordatorios ──
+
+export function listReminders(f: {
+  desde?: string;
+  hasta?: string;
+  solo_pendientes?: boolean;
+  buscar?: string;
+  limite?: number;
+}): Promise<Reminder[]> {
+  if (isPreview()) return mock.listReminders(f);
+  return invoke<Reminder[]>("list_reminders", {
+    desde: f.desde ?? null,
+    hasta: f.hasta ?? null,
+    solo_pendientes: f.solo_pendientes ?? null,
+    buscar: f.buscar ?? null,
+    limite: f.limite ?? null,
+  });
+}
+
+export function createReminder(input: NewReminderInput): Promise<Reminder> {
+  if (isPreview()) return mock.createReminder(input);
+  return invoke<Reminder>("create_reminder", { input });
+}
+
+export function updateReminder(
+  id: number,
+  input: NewReminderInput,
+): Promise<Reminder> {
+  if (isPreview()) return mock.updateReminder(id, input);
+  return invoke<Reminder>("update_reminder", { id, input });
+}
+
+export function deleteReminder(id: number): Promise<void> {
+  if (isPreview()) return mock.deleteReminder(id);
+  return invoke<void>("delete_reminder", { id });
+}
+
+export function setReminderDone(id: number, hecho: boolean): Promise<Reminder> {
+  if (isPreview()) return mock.setReminderDone(id, hecho);
+  return invoke<Reminder>("set_reminder_done", { id, hecho });
+}
+
+export function dueReminders(ahora: string): Promise<Reminder[]> {
+  if (isPreview()) return mock.dueReminders(ahora);
+  return invoke<Reminder[]>("due_reminders", { ahora });
+}
+
+// ── Sistema ──
+
+export function getDataDir(): Promise<string> {
+  if (isPreview()) return Promise.resolve("Memoria (vista previa web)");
+  return invoke<string>("data_dir");
+}
+
+export function isAutostart(): Promise<boolean> {
+  if (isPreview()) return mock.isAutostart();
+  return invoke<boolean>("is_autostart");
+}
+
+export function setAutostart(enable: boolean): Promise<void> {
+  if (isPreview()) return mock.setAutostart(enable);
+  return invoke<void>("set_autostart", { enable });
 }
