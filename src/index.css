@@ -4,6 +4,10 @@
   --font-sans: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
 }
 
+:root {
+  color-scheme: dark;
+}
+
 html,
 body,
 #root {
@@ -32,4 +36,88 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #52525b;
+}
+
+/* ── Tema claro ─────────────────────────────
+   Remapeo por subcadena de clase: cubre también variantes con /opacidad
+   (ej. bg-zinc-900/60). Los :hover de Tailwind quedan inactivos en claro. */
+.light {
+  color-scheme: light;
+}
+.light body {
+  background-color: #fafafa;
+  color: #18181b;
+}
+.light ::-webkit-scrollbar-thumb {
+  background: #d4d4d8;
+  border-color: #fafafa;
+}
+.light [class*="bg-zinc-950"] {
+  background-color: #fafafa !important;
+}
+.light [class*="bg-zinc-900"] {
+  background-color: #ffffff !important;
+}
+.light [class*="bg-zinc-800"] {
+  background-color: #e9e9ec !important;
+}
+.light [class*="bg-zinc-700"] {
+  background-color: #d4d4d8 !important;
+}
+.light [class*="bg-zinc-500"] {
+  background-color: #a1a1aa !important;
+}
+.light [class*="bg-black"] {
+  background-color: rgb(0 0 0 / 0.4) !important;
+}
+.light [class*="border-zinc-800"],
+.light [class*="border-zinc-700"] {
+  border-color: #e4e4e7 !important;
+}
+.light .divide-zinc-800\/60 > :not([hidden]) ~ :not([hidden]),
+.light .divide-zinc-800 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #e4e4e7 !important;
+}
+.light [class*="text-zinc-50"],
+.light [class*="text-zinc-100"],
+.light [class*="text-zinc-200"] {
+  color: #18181b !important;
+}
+.light [class*="text-zinc-300"] {
+  color: #27272a !important;
+}
+.light [class*="text-zinc-400"] {
+  color: #52525b !important;
+}
+.light [class*="text-zinc-500"],
+.light [class*="text-zinc-600"] {
+  color: #71717a !important;
+}
+.light .placeholder-zinc-500::placeholder {
+  color: #a1a1aa !important;
+}
+.light [class*="text-emerald-300"] {
+  color: #047857 !important;
+}
+.light [class*="text-emerald-400"] {
+  color: #059669 !important;
+}
+.light [class*="text-red-300"] {
+  color: #b91c1c !important;
+}
+.light [class*="bg-red-950"] {
+  background-color: #fee2e2 !important;
+}
+.light [class*="border-red-900"] {
+  border-color: #fca5a5 !important;
+}
+.light [class*="text-amber-200"] {
+  color: #92400e !important;
+}
+.light [class*="bg-amber-950"] {
+  background-color: #fef3c7 !important;
+}
+.light [class*="border-amber-800"],
+.light [class*="border-amber-700"] {
+  border-color: #fcd34d !important;
 }

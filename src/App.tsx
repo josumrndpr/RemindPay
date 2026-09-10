@@ -5,14 +5,19 @@ import Dashboard from "./components/Dashboard";
 import Deudas from "./components/Deudas";
 import DuePanel from "./components/DuePanel";
 import Pagos from "./components/Pagos";
+import PinGate from "./components/PinGate";
 import Recordatorios from "./components/Recordatorios";
 import {
+  createBackup,
   dueReminders,
+  getSetting,
+  isPinSet,
   isPreview,
+  listBackups,
   ping,
   updateReminder,
 } from "./lib/api";
-import { ahoraLocal, sumarMinutos } from "./lib/format";
+import { ahoraArchivo, ahoraLocal, sumarMinutos, todayLocal } from "./lib/format";
 import { avisar } from "./lib/notify";
 import { completarRecordatorio } from "./lib/recordatorios";
 import { beep } from "./lib/sound";
@@ -27,7 +32,10 @@ const NAV: { id: Section; label: string; fase?: string }[] = [
   { id: "config", label: "Configuración" },
 ];
 
+type Lock = "cargando" | "crear" | "pedir" | "ok";
+
 export default function App() {
+  const [lock, setLock] = useState<Lock>("cargando");
   const [section, setSection] = useState<Section>("dashboard");
   const [signalNuevo, setSignalNuevo] = useState(0);
   const [signalDeuda, setSignalDeuda] = useState(0);
@@ -36,21 +44,30 @@ export default function App() {
   const [bridgeMs, setBridgeMs] = useState<number | null>(null);
   const [dueItems, setDueItems] = useState<Reminder[]>([]);
   const notifiedRef = useRef<Set<number>>(new Set());
+  const backupRef = useRef(false);
 
-  function nuevoPago() {
-    setSection("pagos");
-    setSignalNuevo((s) => s + 1);
-  }
+  // PIN: crear en primer uso, pedir en los siguientes.
+  useEffect(() => {
+    void (async () => {
+      try {
+        setLock((await isPinSet()) ? "pedir" : "crear");
+      } catch {
+        setLock("pedir");
+      }
+    })();
+  }, []);
 
-  function nuevaDeuda() {
-    setSection("deudas");
-    setSignalDeuda((s) => s + 1);
-  }
-
-  function nuevoRecordatorio() {
-    setSection("recordatorios");
-    setSignalRec((s) => s + 1);
-  }
+  // Tema guardado.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const t = await getSetting("tema");
+        document.documentElement.classList.toggle("light", t === "claro");
+      } catch {
+        /* tema por defecto */
+      }
+    })();
+  }, []);
 
   // Revisa vencidos: notificación nativa + sonido + panel persistente.
   const revisar = useCallback(async (conSonido: boolean) => {
@@ -73,7 +90,25 @@ export default function App() {
     }
   }, []);
 
+  // Respaldo diario automático (una vez por sesión, tras desbloquear).
   useEffect(() => {
+    if (lock !== "ok" || backupRef.current) return;
+    backupRef.current = true;
+    void (async () => {
+      try {
+        const hoy = `remindpay-${todayLocal()}`;
+        const lista = await listBackups();
+        if (!lista.some((b) => b.nombre.startsWith(hoy))) {
+          await createBackup(ahoraArchivo());
+        }
+      } catch {
+        /* respaldo silencioso */
+      }
+    })();
+  }, [lock]);
+
+  useEffect(() => {
+    if (lock !== "ok") return;
     void revisar(false);
     const t = setInterval(() => void revisar(true), 60000);
     const onFocus = () => void revisar(true);
@@ -82,7 +117,7 @@ export default function App() {
       clearInterval(t);
       window.removeEventListener("focus", onFocus);
     };
-  }, [revisar]);
+  }, [lock, revisar]);
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -96,7 +131,22 @@ export default function App() {
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [lock]);
+
+  function nuevoPago() {
+    setSection("pagos");
+    setSignalNuevo((s) => s + 1);
+  }
+
+  function nuevaDeuda() {
+    setSection("deudas");
+    setSignalDeuda((s) => s + 1);
+  }
+
+  function nuevoRecordatorio() {
+    setSection("recordatorios");
+    setSignalRec((s) => s + 1);
+  }
 
   async function hechoDue(id: number) {
     const r = dueItems.find((x) => x.id === id);
@@ -148,6 +198,19 @@ export default function App() {
     }
   }
 
+  if (lock === "cargando") {
+    return <div className="h-full bg-zinc-950" />;
+  }
+
+  if (lock !== "ok") {
+    return (
+      <PinGate
+        modo={lock === "crear" ? "crear" : "pedir"}
+        onOk={() => setLock("ok")}
+      />
+    );
+  }
+
   return (
     <div className="flex h-full bg-zinc-950 text-zinc-50">
       {/* Sidebar */}
@@ -178,25 +241,33 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <div className="border-t border-zinc-800 p-4 text-xs text-zinc-500">
-          <p className="font-medium text-zinc-400">Puente Rust</p>
-          {bridge === null ? (
-            <button
-              onClick={testBridge}
-              className="mt-2 w-full rounded-lg bg-zinc-800 px-3 py-1.5 text-zinc-200 hover:bg-zinc-700"
-            >
-              Probar conexión
-            </button>
-          ) : (
-            <button onClick={testBridge} className="mt-2 w-full text-left">
-              <span className="block truncate font-mono text-emerald-400">
-                {bridge}
-              </span>
-              {bridgeMs !== null && (
-                <span className="text-zinc-500">{bridgeMs} ms</span>
-              )}
-            </button>
-          )}
+        <div className="space-y-2 border-t border-zinc-800 p-4 text-xs text-zinc-500">
+          <button
+            onClick={() => setLock("pedir")}
+            className="w-full rounded-lg bg-zinc-800 px-3 py-1.5 text-zinc-200 hover:bg-zinc-700"
+          >
+            Bloquear
+          </button>
+          <div>
+            <p className="font-medium text-zinc-400">Puente Rust</p>
+            {bridge === null ? (
+              <button
+                onClick={testBridge}
+                className="mt-2 w-full rounded-lg bg-zinc-800 px-3 py-1.5 text-zinc-200 hover:bg-zinc-700"
+              >
+                Probar conexión
+              </button>
+            ) : (
+              <button onClick={testBridge} className="mt-2 w-full text-left">
+                <span className="block truncate font-mono text-emerald-400">
+                  {bridge}
+                </span>
+                {bridgeMs !== null && (
+                  <span className="text-zinc-500">{bridgeMs} ms</span>
+                )}
+              </button>
+            )}
+          </div>
         </div>
       </aside>
 

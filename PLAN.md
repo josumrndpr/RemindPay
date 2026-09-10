@@ -35,7 +35,7 @@ Sidebar: Dashboard / Pagos / Deudas / Recordatorios / Contactos / Config. PIN ga
 - [x] **Fase 1 (código)** — Pagos + Dashboard (CRUD, filtros, balance, SQLite en Rust con 5 tests). Compilación Rust pendiente del workload C++.
 - [x] **Fase 2 (código)** — Deudas + abonos + Contactos (CRUD, sobrepago limitado con saldo automático, vencidas derivadas, resumen por cobrar/por pagar, 10 tests). Categoría "Suscripción" agregada (seed idempotente). Compilación Rust pendiente del workload C++.
 - [x] **Fase 3 (código)** — Recordatorios + notificaciones nativas + sonido WebAudio + panel persistente (Hecho/+10 min) + repetición con siguiente ocurrencia automática + autostart + bandeja con X→minimizar + single-instance + Config (14 tests Rust). Compilación Rust pendiente del workload C++.
-- [ ] **Fase 4** — PIN real (Argon2), backups diarios, export CSV, tema, instalador NSIS firmado local.
+- [x] **Fase 4 (código)** — PIN Argon2id (crear/pedir/cambiar/bloquear) + ajustes genéricos + respaldos diarios automáticos (VACUUM INTO, últimas 30) + export CSV (pagos/deudas/avisos, Excel-compatible) + tema oscuro/claro persistente + NSIS. 16 tests Rust. Compilación Rust pendiente del workload C++ (nota: el PIN es puerta de acceso, no cifrado del archivo).
 
 ## Requisito de máquina (Windows)
 Para `tauri dev` / `tauri build` hace falta VS 2022 con workload **"Desarrollo para el escritorio con C++"** + WebView2 (ya lo tienes). Sin eso: `npm run dev` (solo web) y `cargo check` sí funcionan. Instálalo desde Visual Studio Installer → Modificar → marcar C++ → Instalar (~6GB).

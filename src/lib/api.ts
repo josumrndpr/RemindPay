@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { todayLocal } from "./format";
 import * as mock from "./mock";
 import type {
+  BackupInfo,
   Category,
   Contact,
   Debt,
@@ -218,4 +219,46 @@ export function isAutostart(): Promise<boolean> {
 export function setAutostart(enable: boolean): Promise<void> {
   if (isPreview()) return mock.setAutostart(enable);
   return invoke<void>("set_autostart", { enable });
+}
+
+// ── Ajustes, PIN, respaldos ──
+
+export function getSetting(clave: string): Promise<string | null> {
+  if (isPreview()) return mock.getSetting(clave);
+  return invoke<string | null>("get_setting", { clave });
+}
+
+export function setSetting(clave: string, valor: string): Promise<void> {
+  if (isPreview()) return mock.setSetting(clave, valor);
+  return invoke<void>("set_setting", { clave, valor });
+}
+
+export function isPinSet(): Promise<boolean> {
+  if (isPreview()) return mock.isPinSet();
+  return invoke<boolean>("is_pin_set");
+}
+
+export function setPin(pin: string): Promise<void> {
+  if (isPreview()) return mock.setPin(pin);
+  return invoke<void>("set_pin", { pin });
+}
+
+export function verifyPin(pin: string): Promise<boolean> {
+  if (isPreview()) return mock.verifyPin(pin);
+  return invoke<boolean>("verify_pin", { pin });
+}
+
+export function listBackups(): Promise<BackupInfo[]> {
+  if (isPreview()) return mock.listBackups();
+  return invoke<BackupInfo[]>("list_backups");
+}
+
+export function createBackup(stamp: string): Promise<BackupInfo> {
+  if (isPreview()) return mock.createBackup(stamp);
+  return invoke<BackupInfo>("create_backup", { stamp });
+}
+
+/** Solo app instalada (en vista previa export.ts descarga directo). */
+export function writeTextFile(path: string, content: string): Promise<void> {
+  return invoke<void>("write_text_file", { path, content });
 }

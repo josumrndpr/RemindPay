@@ -8,6 +8,10 @@ use crate::models::{
     NewContact, NewDebt, NewDebtPayment, NewPayment, NewReminder, Payment, PaymentFilter, Reminder,
     ReminderFilter,
 };
+use argon2::{
+    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    Argon2,
+};
 use rusqlite::{params, Connection, Row};
 
 const SCHEMA: &str = include_str!("../schema.sql");
@@ -778,6 +782,61 @@ pub fn due_reminders(conn: &Connection, ahora: &str) -> Result<Vec<Reminder>, St
     Ok(out)
 }
 
+// ── Ajustes y PIN ────────────────────────────────────────────────────────
+
+pub fn get_setting(conn: &Connection, clave: &str) -> Result<Option<String>, String> {
+    match conn.query_row(
+        "SELECT valor FROM settings WHERE clave = ?1",
+        params![clave],
+        |r| r.get::<_, String>(0),
+    ) {
+        Ok(v) => Ok(Some(v)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(format!("get setting: {e}")),
+    }
+}
+
+pub fn set_setting(conn: &Connection, clave: &str, valor: &str) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO settings (clave, valor) VALUES (?1, ?2) ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
+        params![clave, valor],
+    )
+    .map_err(|e| format!("set setting: {e}"))?;
+    Ok(())
+}
+
+fn pin_formato_ok(pin: &str) -> bool {
+    (4..=8).contains(&pin.len()) && pin.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Guarda el PIN como hash Argon2id. El PIN en claro nunca toca el disco.
+pub fn set_pin(conn: &Connection, pin: &str) -> Result<(), String> {
+    if !pin_formato_ok(pin) {
+        return Err("el PIN debe tener de 4 a 8 dígitos".into());
+    }
+    let salt = SaltString::generate(&mut OsRng);
+    let hash = Argon2::default()
+        .hash_password(pin.as_bytes(), &salt)
+        .map_err(|e| format!("hash: {e}"))?
+        .to_string();
+    set_setting(conn, "pin_hash", &hash)
+}
+
+pub fn is_pin_set(conn: &Connection) -> Result<bool, String> {
+    Ok(get_setting(conn, "pin_hash")?.is_some())
+}
+
+pub fn verify_pin(conn: &Connection, pin: &str) -> Result<bool, String> {
+    let stored = match get_setting(conn, "pin_hash")? {
+        Some(h) => h,
+        None => return Ok(false),
+    };
+    let parsed = PasswordHash::new(&stored).map_err(|e| format!("hash inválido: {e}"))?;
+    Ok(Argon2::default()
+        .verify_password(pin.as_bytes(), &parsed)
+        .is_ok())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1010,5 +1069,30 @@ mod tests {
         let mut r = reminder_sample("X", "2026-09-15T10:00");
         r.repetir = "anual".into();
         assert!(insert_reminder(&conn, &r).is_err());
+    }
+
+    #[test]
+    fn pin_roundtrip() {
+        let conn = mem();
+        assert!(!is_pin_set(&conn).unwrap());
+        assert!(!verify_pin(&conn, "1234").unwrap());
+        set_pin(&conn, "1234").unwrap();
+        assert!(is_pin_set(&conn).unwrap());
+        assert!(verify_pin(&conn, "1234").unwrap());
+        assert!(!verify_pin(&conn, "4321").unwrap());
+        assert!(set_pin(&conn, "12ab").is_err());
+        assert!(set_pin(&conn, "123").is_err());
+        assert!(set_pin(&conn, "123456789").is_err());
+    }
+
+    #[test]
+    fn settings_set_get() {
+        let conn = mem();
+        assert_eq!(get_setting(&conn, "tema").unwrap(), None);
+        set_setting(&conn, "tema", "claro").unwrap();
+        assert_eq!(
+            get_setting(&conn, "tema").unwrap().as_deref(),
+            Some("claro")
+        );
     }
 }

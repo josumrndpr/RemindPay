@@ -170,3 +170,10 @@ pub struct ReminderFilter {
     pub buscar: Option<String>,
     pub limite: i64,
 }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BackupInfo {
+    pub nombre: String,
+    pub bytes: u64,
+    pub creado_secs: u64,
+}

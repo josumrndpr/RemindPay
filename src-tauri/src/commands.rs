@@ -2,9 +2,9 @@
 
 use crate::db;
 use crate::models::{
-    Category, Contact, Debt, DebtFilter, DebtPayment, DebtsSummary, EditDebt, MonthSummary,
-    NewContact, NewDebt, NewDebtPayment, NewPayment, NewReminder, Payment, PaymentFilter, Reminder,
-    ReminderFilter,
+    BackupInfo, Category, Contact, Debt, DebtFilter, DebtPayment, DebtsSummary, EditDebt,
+    MonthSummary, NewContact, NewDebt, NewDebtPayment, NewPayment, NewReminder, Payment,
+    PaymentFilter, Reminder, ReminderFilter,
 };
 use rusqlite::Connection;
 use std::sync::Mutex;
@@ -280,4 +280,126 @@ pub fn set_autostart(app: AppHandle, enable: bool) -> Result<(), String> {
         launcher.disable()
     }
     .map_err(|e| format!("autostart: {e}"))
+}
+
+// ── Ajustes, PIN, respaldos ──
+
+#[tauri::command]
+pub fn get_setting(
+    state: State<'_, Mutex<Connection>>,
+    clave: String,
+) -> Result<Option<String>, String> {
+    let conn = state.lock().map_err(|e| format!("db bloqueada: {e}"))?;
+    db::get_setting(&conn, &clave)
+}
+
+#[tauri::command]
+pub fn set_setting(
+    state: State<'_, Mutex<Connection>>,
+    clave: String,
+    valor: String,
+) -> Result<(), String> {
+    let conn = state.lock().map_err(|e| format!("db bloqueada: {e}"))?;
+    db::set_setting(&conn, &clave, &valor)
+}
+
+#[tauri::command]
+pub fn is_pin_set(state: State<'_, Mutex<Connection>>) -> Result<bool, String> {
+    let conn = state.lock().map_err(|e| format!("db bloqueada: {e}"))?;
+    db::is_pin_set(&conn)
+}
+
+#[tauri::command]
+pub fn set_pin(state: State<'_, Mutex<Connection>>, pin: String) -> Result<(), String> {
+    let conn = state.lock().map_err(|e| format!("db bloqueada: {e}"))?;
+    db::set_pin(&conn, &pin)
+}
+
+#[tauri::command]
+pub fn verify_pin(state: State<'_, Mutex<Connection>>, pin: String) -> Result<bool, String> {
+    let conn = state.lock().map_err(|e| format!("db bloqueada: {e}"))?;
+    db::verify_pin(&conn, &pin)
+}
+
+fn backups_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app_data_dir: {e}"))?
+        .join("backups");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("crear backups: {e}"))?;
+    Ok(dir)
+}
+
+fn backup_info(path: &std::path::Path) -> Result<BackupInfo, String> {
+    let meta = std::fs::metadata(path).map_err(|e| format!("metadata: {e}"))?;
+    let creado = meta
+        .created()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    Ok(BackupInfo {
+        nombre: path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        bytes: meta.len(),
+        creado_secs: creado,
+    })
+}
+
+fn listar_nombres(dir: &std::path::Path) -> Result<Vec<String>, String> {
+    let mut nombres: Vec<String> = std::fs::read_dir(dir)
+        .map_err(|e| format!("leer backups: {e}"))?
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with("remindpay-") && n.ends_with(".db"))
+        .collect();
+    nombres.sort();
+    nombres.reverse();
+    Ok(nombres)
+}
+
+#[tauri::command]
+pub fn list_backups(app: AppHandle) -> Result<Vec<BackupInfo>, String> {
+    let dir = backups_dir(&app)?;
+    let mut out = Vec::new();
+    for n in listar_nombres(&dir)? {
+        out.push(backup_info(&dir.join(n))?);
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+pub fn create_backup(
+    state: State<'_, Mutex<Connection>>,
+    app: AppHandle,
+    stamp: String,
+) -> Result<BackupInfo, String> {
+    if stamp.len() > 32
+        || !stamp
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        return Err("marca inválida".into());
+    }
+    let dir = backups_dir(&app)?;
+    let dest = dir.join(format!("remindpay-{stamp}.db"));
+    let ruta = dest.to_string_lossy().replace('\'', "''");
+    {
+        let conn = state.lock().map_err(|e| format!("db bloqueada: {e}"))?;
+        conn.execute_batch(&format!("VACUUM INTO '{ruta}'"))
+            .map_err(|e| format!("backup: {e}"))?;
+    }
+    for viejo in listar_nombres(&dir)?.into_iter().skip(30) {
+        let _ = std::fs::remove_file(dir.join(viejo));
+    }
+    backup_info(&dest)
+}
+
+#[tauri::command]
+pub fn write_text_file(path: String, content: String) -> Result<(), String> {
+    std::fs::write(&path, content).map_err(|e| format!("escribir: {e}"))?;
+    Ok(())
 }

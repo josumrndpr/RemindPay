@@ -112,6 +112,12 @@ export interface DebtsSummary {
   activas: number;
 }
 
+export interface BackupInfo {
+  nombre: string;
+  bytes: number;
+  creado_secs: number;
+}
+
 export interface Reminder {
   id: number;
   titulo: string;

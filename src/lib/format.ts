@@ -80,3 +80,37 @@ export function siguienteRepeticion(fh: string, repetir: string): string {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
+
+/** Para nombres de archivo: 2026-09-10-153022 */
+export function ahoraArchivo(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
+/** Segundos epoch → "10 sep 2026, 3:30 p. m." (0 → "—") */
+export function fmtBackupFecha(secs: number): string {
+  if (!secs) return "—";
+  const d = new Date(secs * 1000);
+  return (
+    d.toLocaleDateString("es-PR", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    }) +
+    ", " +
+    d.toLocaleTimeString("es-PR", { hour: "numeric", minute: "2-digit" })
+  );
+}
+
+export function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(2)} MB`;
+}
+
+/** Celda CSV con comillas escapadas */
+export function csvCell(v: string | number | null): string {
+  const s = v == null ? "" : String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}

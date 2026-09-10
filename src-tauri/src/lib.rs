@@ -114,6 +114,14 @@ pub fn run() {
             commands::data_dir,
             commands::is_autostart,
             commands::set_autostart,
+            commands::get_setting,
+            commands::set_setting,
+            commands::is_pin_set,
+            commands::set_pin,
+            commands::verify_pin,
+            commands::list_backups,
+            commands::create_backup,
+            commands::write_text_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running RemindPay");

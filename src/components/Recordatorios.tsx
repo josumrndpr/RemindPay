@@ -42,7 +42,7 @@ const REPETIR: { id: Recurrence; label: string }[] = [
 const inputCls =
   "w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 outline-none focus:border-emerald-500";
 
-export function repetirLabel(r: Recurrence): string {
+function repetirLabel(r: Recurrence): string {
   return REPETIR.find((x) => x.id === r)?.label ?? r;
 }
 

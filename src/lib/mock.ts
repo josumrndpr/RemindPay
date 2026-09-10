@@ -3,6 +3,7 @@
 // se reinician al recargar. El backend real es SQLite en Rust (db.rs).
 import { todayLocal } from "./format";
 import type {
+  BackupInfo,
   Category,
   Contact,
   Debt,
@@ -595,4 +596,55 @@ export async function isAutostart(): Promise<boolean> {
 
 export async function setAutostart(enable: boolean): Promise<void> {
   mockAutostart = enable;
+}
+
+// ── Ajustes, PIN, respaldos (vista previa: memoria/localStorage) ──
+
+export async function getSetting(clave: string): Promise<string | null> {
+  try {
+    return window.localStorage.getItem(`remindpay:${clave}`);
+  } catch {
+    return null;
+  }
+}
+
+export async function setSetting(clave: string, valor: string): Promise<void> {
+  try {
+    window.localStorage.setItem(`remindpay:${clave}`, valor);
+  } catch {
+    /* sin almacenamiento */
+  }
+}
+
+let mockPin: string | null = null;
+
+export async function isPinSet(): Promise<boolean> {
+  return mockPin !== null;
+}
+
+export async function setPin(pin: string): Promise<void> {
+  if (!/^\d{4,8}$/.test(pin)) throw new Error("el PIN debe tener de 4 a 8 dígitos");
+  mockPin = pin;
+}
+
+export async function verifyPin(pin: string): Promise<boolean> {
+  if (mockPin === null) return false;
+  return pin === mockPin;
+}
+
+const mockBackups: BackupInfo[] = [];
+
+export async function listBackups(): Promise<BackupInfo[]> {
+  return [...mockBackups].reverse();
+}
+
+export async function createBackup(stamp: string): Promise<BackupInfo> {
+  const b: BackupInfo = {
+    nombre: `remindpay-${stamp}.db`,
+    bytes: 24576,
+    creado_secs: Math.floor(Date.now() / 1000),
+  };
+  mockBackups.push(b);
+  while (mockBackups.length > 30) mockBackups.shift();
+  return b;
 }
