@@ -1,39 +1,42 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import Dashboard from "./components/Dashboard";
+import Pagos from "./components/Pagos";
 import { ping } from "./lib/api";
-import { fmtUSD } from "./lib/format";
 import type { Section } from "./lib/types";
 
-const NAV: { id: Section; label: string; fase: string }[] = [
-  { id: "dashboard", label: "Dashboard", fase: "Fase 1" },
-  { id: "pagos", label: "Pagos", fase: "Fase 1" },
+const NAV: { id: Section; label: string; fase?: string }[] = [
+  { id: "dashboard", label: "Dashboard" },
+  { id: "pagos", label: "Pagos" },
   { id: "deudas", label: "Deudas", fase: "Fase 2" },
   { id: "recordatorios", label: "Recordatorios", fase: "Fase 3" },
   { id: "contactos", label: "Contactos", fase: "Fase 2" },
   { id: "config", label: "Configuración", fase: "Fase 4" },
 ];
 
-function StatCard({
-  title,
-  value,
-  hint,
-}: {
-  title: string;
-  value: string;
-  hint: string;
-}) {
-  return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-5">
-      <p className="text-sm text-zinc-400">{title}</p>
-      <p className="mt-1 text-3xl font-semibold tracking-tight">{value}</p>
-      <p className="mt-1 text-xs text-zinc-500">{hint}</p>
-    </div>
-  );
-}
-
 export default function App() {
   const [section, setSection] = useState<Section>("dashboard");
+  const [signalNuevo, setSignalNuevo] = useState(0);
   const [bridge, setBridge] = useState<string | null>(null);
   const [bridgeMs, setBridgeMs] = useState<number | null>(null);
+
+  function nuevoPago() {
+    setSection("pagos");
+    setSignalNuevo((s) => s + 1);
+  }
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      const k = e.key.toLowerCase();
+      if (k === "n") nuevoPago();
+      else if (k === "d") setSection("deudas");
+      else if (k === "r") setSection("recordatorios");
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function testBridge() {
     const t0 = performance.now();
@@ -69,7 +72,7 @@ export default function App() {
               }`}
             >
               {item.label}
-              {item.id !== "dashboard" && (
+              {item.fase && (
                 <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500">
                   {item.fase}
                 </span>
@@ -101,37 +104,17 @@ export default function App() {
 
       {/* Contenido */}
       <main className="flex-1 overflow-y-auto p-8">
-        {section === "dashboard" && (
-          <div>
-            <h2 className="text-2xl font-semibold tracking-tight">Dashboard</h2>
-            <p className="mt-1 text-sm text-zinc-500">
-              Resumen del mes · datos reales en Fase 1
-            </p>
-            <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <StatCard
-                title="Balance del mes"
-                value={fmtUSD(0)}
-                hint="ingresos − gastos"
-              />
-              <StatCard title="Por cobrar" value={fmtUSD(0)} hint="me deben" />
-              <StatCard title="Por pagar" value={fmtUSD(0)} hint="yo debo" />
-              <StatCard
-                title="Vencen en 7 días"
-                value="0"
-                hint="pagos + deudas + recordatorios"
-              />
-            </div>
-          </div>
-        )}
-        {section !== "dashboard" && (
+        {section === "dashboard" && <Dashboard onNuevoPago={nuevoPago} />}
+        {section === "pagos" && <Pagos signalNuevo={signalNuevo} />}
+        {section !== "dashboard" && section !== "pagos" && (
           <div className="flex h-full flex-col items-center justify-center text-center">
             <h2 className="text-2xl font-semibold capitalize tracking-tight">
               {NAV.find((n) => n.id === section)?.label}
             </h2>
             <p className="mt-2 max-w-sm text-sm text-zinc-500">
               Este módulo se construye en{" "}
-              {NAV.find((n) => n.id === section)?.fase}. La base (tipos,
-              esquema SQLite y comandos Rust) ya está planificada en PLAN.md.
+              {NAV.find((n) => n.id === section)?.fase}. La base (tipos y
+              esquema SQLite) ya está lista en PLAN.md y schema.sql.
             </p>
           </div>
         )}

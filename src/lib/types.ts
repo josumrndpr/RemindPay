@@ -24,13 +24,31 @@ export interface Payment {
   id: number;
   tipo: PaymentType;
   monto_cents: Money;
-  fecha: string; // ISO yyyy-MM-dd
+  fecha: string; // yyyy-MM-dd
   categoria_id: number | null;
+  categoria: string | null;
   descripcion: string;
   contacto_id: number | null;
   comprobante_path: string;
   recurrente: Recurrence;
   created_at: string;
+}
+
+/** Lo que envía el frontend al crear/editar: monto en dólares. */
+export interface NewPaymentInput {
+  tipo: PaymentType;
+  monto: number;
+  fecha: string;
+  categoria_id: number | null;
+  descripcion: string;
+}
+
+export interface MonthSummary {
+  mes: string;
+  ingresos_cents: Money;
+  gastos_cents: Money;
+  balance_cents: Money;
+  count: number;
 }
 
 export type DebtDirection = "debo" | "me_deben";
@@ -61,7 +79,7 @@ export interface Reminder {
   id: number;
   titulo: string;
   detalle: string;
-  fecha_hora: string; // ISO datetime
+  fecha_hora: string;
   repetir: Recurrence;
   payment_id: number | null;
   debt_id: number | null;
