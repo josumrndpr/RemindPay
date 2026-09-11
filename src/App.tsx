@@ -22,6 +22,7 @@ import {
   ping,
   updateReminder,
 } from "./lib/api";
+import { getAiConfig, isAiConfigured } from "./lib/ai";
 import {
   ahoraArchivo,
   ahoraLocal,
@@ -31,6 +32,7 @@ import {
 import { avisar } from "./lib/notify";
 import { completarRecordatorio } from "./lib/recordatorios";
 import { beep } from "./lib/sound";
+import { pasarChequeo } from "./lib/monitor";
 import type { Reminder, Section } from "./lib/types";
 
 const NAV_MAIN: { id: Section; label: string; icon: "dashboard" | "pagos" | "deudas" | "calendar" | "bell" | "sparkles"; atajo: string }[] = [
@@ -172,6 +174,32 @@ export default function App() {
             `Se generaron ${n} pago(s) recurrentes automáticamente`,
           );
           setTimeout(() => setToast(null), 6000);
+        }
+      } catch {
+        /* silencioso */
+      }
+    })();
+  }, [lock]);
+
+  // Chequeo de Aura (1 vez por sesión): solo avisa si hay urgentes.
+  const monitorRef = useRef(false);
+  useEffect(() => {
+    if (lock !== "ok" || monitorRef.current) return;
+    monitorRef.current = true;
+    void (async () => {
+      try {
+        const cfg = await getAiConfig();
+        if (!isAiConfigured(cfg)) return;
+        const alertas = await pasarChequeo(cfg);
+        const urg = alertas.filter((a) => a.nivel === "urgente");
+        if (urg.length > 0) {
+          beep(2);
+          await avisar(
+            "RemindPay",
+            urg.length === 1
+              ? urg[0].texto
+              : `${urg.length} alertas urgentes en tu dinero`,
+          );
         }
       } catch {
         /* silencioso */

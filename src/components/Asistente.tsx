@@ -1,23 +1,43 @@
 import { useEffect, useRef, useState } from "react";
 import {
   createPayment,
+  createReminder,
   debtsSummary,
   listCategories,
   listPayments,
+  marcarPago,
   paymentsSummary,
 } from "../lib/api";
 import {
   chatCompletion,
   getAiConfig,
   isAiConfigured,
-  parsePagoJSON,
+  parseAccionJSON,
+  promptAccionesSistema,
+  promptChatSistema,
+  type AccionIA,
   type AiConfig,
   type ChatMsg,
   type ChatUsage,
   type PagoExtraido,
 } from "../lib/ai";
-import { fmtFecha, fmtUSD, monthLabel, monthLocal, todayLocal } from "../lib/format";
-import type { Category } from "../lib/types";
+import { getChequeo, pasarChequeo, type Alerta } from "../lib/monitor";
+import { avisar } from "../lib/notify";
+import { beep } from "../lib/sound";
+import {
+  fmtFecha,
+  fmtFechaHora,
+  fmtUSD,
+  monthLabel,
+  monthLocal,
+  todayLocal,
+} from "../lib/format";
+import type {
+  Category,
+  NewReminderInput,
+  Payment,
+  Recurrence,
+} from "../lib/types";
 import {
   Badge,
   Empty,
@@ -35,23 +55,37 @@ interface Burbuja {
   uso?: ChatUsage;
 }
 
-interface Pendiente {
-  pago: PagoExtraido;
-  categoriaId: number | null;
-  categoriaNombre: string | null;
-}
+type Pendiente =
+  | {
+      kind: "pago";
+      pago: PagoExtraido;
+      categoriaId: number | null;
+      categoriaNombre: string | null;
+    }
+  | { kind: "recordatorio"; input: NewReminderInput }
+  | { kind: "marcar"; pago: Payment };
 
 let seq = 1;
+
+const nivelTone: Record<Alerta["nivel"], "red" | "amber" | "zinc"> = {
+  urgente: "red",
+  aviso: "amber",
+  info: "zinc",
+};
 
 export default function Asistente({ onIrConfig }: { onIrConfig: () => void }) {
   const [cfg, setCfg] = useState<AiConfig | null>(null);
   const [cats, setCats] = useState<Category[]>([]);
   const [msgs, setMsgs] = useState<Burbuja[]>([]);
   const [input, setInput] = useState("");
-  const [modo, setModo] = useState<"chat" | "registro">("chat");
+  const [modo, setModo] = useState<"chat" | "acciones">("chat");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pend, setPend] = useState<Pendiente | null>(null);
+  const [chequeo, setChequeo] = useState<Alerta[]>(
+    () => getChequeo()?.alertas ?? [],
+  );
+  const [revisando, setRevisando] = useState(false);
   const finRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -68,7 +102,7 @@ export default function Asistente({ onIrConfig }: { onIrConfig: () => void }) {
 
   useEffect(() => {
     finRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [msgs, pend]);
+  }, [msgs, pend, chequeo]);
 
   function push(de: "user" | "assistant", texto: string, uso?: ChatUsage) {
     setMsgs((m) => [...m, { id: seq++, de, texto, uso }]);
@@ -76,7 +110,6 @@ export default function Asistente({ onIrConfig }: { onIrConfig: () => void }) {
 
   async function contextoMes(): Promise<string> {
     const mes = monthLocal();
-    const hoy = todayLocal();
     const [s, d, pends] = await Promise.all([
       paymentsSummary(mes),
       debtsSummary(),
@@ -87,29 +120,14 @@ export default function Asistente({ onIrConfig }: { onIrConfig: () => void }) {
       .slice(0, 8)
       .map(
         (p) =>
-          `- ${p.descripcion || p.tipo} ${fmtUSD(p.monto_cents)} el ${p.fecha}`,
+          `- [${p.id}] ${p.descripcion || p.tipo} ${fmtUSD(p.monto_cents)} el ${p.fecha}`,
       )
       .join("\n");
     return [
-      `Hoy es ${hoy}. Mes en vista: ${monthLabel(mes)}.`,
+      `Hoy es ${todayLocal()}. Mes en vista: ${monthLabel(mes)}.`,
       `Ingresos cobrados: ${fmtUSD(s.ingresos_cents)} · Gastos pagados: ${fmtUSD(s.gastos_cents)} · Balance: ${fmtUSD(s.balance_cents)} (${s.count} movimientos).`,
       `Por cobrar: ${fmtUSD(d.por_cobrar_cents)} · Por pagar: ${fmtUSD(d.por_pagar_cents)} (${d.activas} deudas vivas).`,
       prox ? `Próximos pagos pendientes:\n${prox}` : "Sin pagos pendientes.",
-    ].join("\n");
-  }
-
-  function promptRegistro(): string {
-    const hoy = todayLocal();
-    const dow = new Date().toLocaleDateString("es-PR", { weekday: "long" });
-    const lista = cats.map((c) => c.nombre).join(", ");
-    return [
-      `Extrae UN pago del mensaje del usuario. Hoy es ${hoy} (${dow}).`,
-      "Devuelve SOLO JSON válido, sin markdown ni explicaciones, con esta forma:",
-      '{"tipo":"ingreso"|"gasto","monto":12.5,"fecha":"2026-09-11","categoria":"Comida"|null,"descripcion":"..."}',
-      'Fechas relativas ("ayer", "hoy", "el lunes", "el 15", "la quincena") → fecha absoluta yyyy-MM-dd.',
-      "Monto en dólares como número.",
-      `Categoría: la más cercana de [${lista}] o null si no encaja.`,
-      'Si falta el monto o no se entiende, devuelve {"error":"qué falta en una frase corta"}.',
     ].join("\n");
   }
 
@@ -122,8 +140,9 @@ export default function Asistente({ onIrConfig }: { onIrConfig: () => void }) {
     return c ? { id: c.id, nombre: c.nombre } : { id: null, nombre: null };
   }
 
-  async function enviar(texto?: string) {
+  async function enviar(texto?: string, modoF?: "chat" | "acciones") {
     const mensaje = (texto ?? input).trim();
+    const m = modoF ?? modo;
     if (!mensaje || busy || !cfg) return;
     if (!isAiConfigured(cfg)) {
       setError("Configura tu endpoint y modelo primero.");
@@ -135,31 +154,34 @@ export default function Asistente({ onIrConfig }: { onIrConfig: () => void }) {
     push("user", mensaje);
     setBusy(true);
     try {
-      if (modo === "registro") {
+      if (m === "acciones") {
+        const pends = await listPayments({ estado: "pendiente", limite: 15 });
+        const sys = promptAccionesSistema(
+          cats.map((c) => c.nombre),
+          pends.map(
+            (p) =>
+              `[${p.id}] ${p.descripcion || p.tipo} ${fmtUSD(p.monto_cents)} el ${p.fecha}`,
+          ),
+        );
         const r = await chatCompletion(
           cfg,
           [
-            { role: "system", content: promptRegistro() },
+            { role: "system", content: sys },
             { role: "user", content: mensaje },
           ],
-          { maxTokens: 200, temperature: 0 },
+          { maxTokens: 300, temperature: 0 },
         );
-        const pago = parsePagoJSON(r.text);
-        const m = matchCategoria(pago.categoria);
-        setPend({ pago, categoriaId: m.id, categoriaNombre: m.nombre });
-        push("assistant", "Revisa y confirma para guardar:", r.usage);
+        const acc = parseAccionJSON(r.text);
+        await prepararAccion(acc, r.usage);
       } else {
         const ctx = await contextoMes();
         const historial: ChatMsg[] = msgs
           .slice(-8)
-          .map((m) => ({ role: m.de, content: m.texto }));
+          .map((x) => ({ role: x.de, content: x.texto }));
         const r = await chatCompletion(
           cfg,
           [
-            {
-              role: "system",
-              content: `Eres el asistente de RemindPay, app local de finanzas en USD. Respondes en español, breve y directo, sin adornos. Hablas SOLO de estos datos reales; no inventes cifras. Si te piden registrar un pago, pide monto y fecha en vez de adivinar.\n${ctx}`,
-            },
+            { role: "system", content: promptChatSistema(ctx) },
             ...historial,
             { role: "user", content: mensaje },
           ],
@@ -174,31 +196,122 @@ export default function Asistente({ onIrConfig }: { onIrConfig: () => void }) {
     }
   }
 
+  async function prepararAccion(acc: AccionIA, uso?: ChatUsage) {
+    if (acc.accion === "registrar_pago") {
+      const m = matchCategoria(acc.params.categoria);
+      setPend({
+        kind: "pago",
+        pago: acc.params,
+        categoriaId: m.id,
+        categoriaNombre: m.nombre,
+      });
+      push("assistant", "Revisa y confirma para guardar:", uso);
+      return;
+    }
+    if (acc.accion === "crear_recordatorio") {
+      const p = acc.params;
+      setPend({
+        kind: "recordatorio",
+        input: {
+          titulo: p.titulo,
+          detalle: p.detalle,
+          fecha_hora: p.fecha_hora,
+          repetir: p.repetir as Recurrence,
+          payment_id: null,
+          debt_id: null,
+          sonido: p.sonido,
+          persistente: p.persistente,
+        },
+      });
+      push("assistant", "Revisa y confirma para crear el aviso:", uso);
+      return;
+    }
+    const lista = await listPayments({ estado: "pendiente", limite: 200 });
+    const pago = lista.find((x) => x.id === acc.params.id);
+    if (!pago) {
+      setError("Ese pago ya no está pendiente.");
+      return;
+    }
+    setPend({ kind: "marcar", pago });
+    push("assistant", "Revisa y confirma para marcarlo pagado:", uso);
+  }
+
   async function confirmar() {
-    if (!pend) return;
+    if (!pend || busy) return;
     setBusy(true);
     setError(null);
     try {
-      await createPayment({
-        tipo: pend.pago.tipo,
-        monto: pend.pago.monto,
-        fecha: pend.pago.fecha,
-        categoria_id: pend.categoriaId,
-        contacto_id: null,
-        descripcion: pend.pago.descripcion,
-        recurrente: "none",
-        comprobante_path: "",
-        estado: pend.pago.fecha > todayLocal() ? "pendiente" : "pagado",
-      });
-      push(
-        "assistant",
-        `Guardado: ${pend.pago.descripcion || pend.pago.tipo} por ${fmtUSD(Math.round(pend.pago.monto * 100))} el ${fmtFecha(pend.pago.fecha)}.`,
-      );
+      if (pend.kind === "pago") {
+        const p = pend.pago;
+        await createPayment({
+          tipo: p.tipo,
+          monto: p.monto,
+          fecha: p.fecha,
+          categoria_id: pend.categoriaId,
+          contacto_id: null,
+          descripcion: p.descripcion,
+          recurrente: "none",
+          comprobante_path: "",
+          estado: p.fecha > todayLocal() ? "pendiente" : "pagado",
+        });
+        push(
+          "assistant",
+          `Guardado: ${p.descripcion || p.tipo} por ${fmtUSD(Math.round(p.monto * 100))} el ${fmtFecha(p.fecha)}.`,
+        );
+      } else if (pend.kind === "recordatorio") {
+        const r = await createReminder(pend.input);
+        push(
+          "assistant",
+          `Aviso creado: ${r.titulo} para ${fmtFechaHora(r.fecha_hora)}.`,
+        );
+      } else {
+        await marcarPago(pend.pago.id, "pagado");
+        push(
+          "assistant",
+          `Marcado como pagado: ${pend.pago.descripcion || "pago"} por ${fmtUSD(pend.pago.monto_cents)}.`,
+        );
+      }
       setPend(null);
     } catch (e) {
       setError(String(e));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function revisarAhora() {
+    if (!cfg || revisando) return;
+    if (!isAiConfigured(cfg)) {
+      setError("Configura tu endpoint y modelo primero.");
+      return;
+    }
+    setRevisando(true);
+    setError(null);
+    try {
+      const alertas = await pasarChequeo(cfg);
+      setChequeo(alertas);
+      const urg = alertas.filter((a) => a.nivel === "urgente");
+      if (urg.length > 0) {
+        beep(2);
+        await avisar(
+          "RemindPay",
+          urg.length === 1
+            ? urg[0].texto
+            : `${urg.length} alertas urgentes en tu dinero`,
+        );
+      }
+      if (alertas.length === 0) {
+        push("assistant", "Chequeo listo: todo en orden, sin alertas.");
+      } else {
+        push(
+          "assistant",
+          `Chequeo listo: ${alertas.length} alerta(s). Las ves arriba.`,
+        );
+      }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setRevisando(false);
     }
   }
 
@@ -209,18 +322,18 @@ export default function Asistente({ onIrConfig }: { onIrConfig: () => void }) {
       <div>
         <h2 className="flex items-center gap-2 text-[26px] font-bold tracking-tight">
           <Icon name="sparkles" size={22} className="text-emerald-300" />
-          Asistente
+          Aura
         </h2>
         <p className="mt-0.5 text-sm text-zinc-500">
-          Pregunta por tus datos o registra pagos con palabras. Solo habla con
-          tu endpoint; nada sale de aquí sin tu config.
+          Tu asistente financiera: pregunta, registra, crea avisos y vigila tu
+          dinero. Nada se guarda sin tu confirmación.
         </p>
       </div>
 
       {sinConfig && (
         <div className={`${cardCls} mt-4 flex items-center justify-between gap-3 p-4`}>
           <p className="text-sm text-zinc-400">
-            Conecta tu endpoint (OpenAI-compatible) para activar el asistente.
+            Conecta tu endpoint (OpenAI-compatible) para activar a Aura.
           </p>
           <button onClick={onIrConfig} className={`${btnSecondary} shrink-0 !text-xs`}>
             Ir a Configuración
@@ -228,8 +341,31 @@ export default function Asistente({ onIrConfig }: { onIrConfig: () => void }) {
         </div>
       )}
 
+      {chequeo.length > 0 && (
+        <div className={`${cardCls} mt-4 space-y-2 p-4`}>
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+              Chequeo de Aura
+            </p>
+            <button
+              onClick={() => void revisarAhora()}
+              disabled={revisando}
+              className="text-xs font-medium text-emerald-300 hover:text-emerald-200 disabled:opacity-50"
+            >
+              {revisando ? "Revisando…" : "Revisar ahora"}
+            </button>
+          </div>
+          {chequeo.map((a, i) => (
+            <p key={i} className="flex items-start gap-2 text-sm">
+              <Badge tone={nivelTone[a.nivel]}>{a.nivel}</Badge>
+              <span className="text-zinc-300">{a.texto}</span>
+            </p>
+          ))}
+        </div>
+      )}
+
       <div className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-        {msgs.length === 0 && !pend && (
+        {msgs.length === 0 && !pend && chequeo.length === 0 && (
           <Empty
             icon="sparkles"
             title="¿En qué te ayudo?"
@@ -238,30 +374,32 @@ export default function Asistente({ onIrConfig }: { onIrConfig: () => void }) {
               <div className="flex flex-wrap justify-center gap-2">
                 <button
                   onClick={() => {
-                    setModo("registro");
+                    setModo("acciones");
                     setInput("Pagué ");
                   }}
                   className={btnSecondary}
                 >
-                  Registrar pago
+                  Pagar algo
                 </button>
                 <button
-                  onClick={() => {
-                    setModo("chat");
-                    void enviar("¿Cómo voy este mes?");
-                  }}
+                  onClick={() => void enviar("¿Cómo voy este mes?", "chat")}
                   className={btnSecondary}
                 >
                   ¿Cómo voy este mes?
                 </button>
                 <button
-                  onClick={() => {
-                    setModo("chat");
-                    void enviar("¿Qué vence pronto?");
-                  }}
+                  onClick={() =>
+                    void enviar("Recuérdame pagar la tarjeta mañana a las 9am", "acciones")
+                  }
                   className={btnSecondary}
                 >
-                  ¿Qué vence pronto?
+                  Crear un aviso
+                </button>
+                <button
+                  onClick={() => void revisarAhora()}
+                  className={btnSecondary}
+                >
+                  Chequeo de mi dinero
                 </button>
               </div>
             }
@@ -291,33 +429,63 @@ export default function Asistente({ onIrConfig }: { onIrConfig: () => void }) {
         {pend && (
           <div className="anim-pop rounded-2xl border border-emerald-800 bg-emerald-950/30 p-4">
             <p className="text-xs font-semibold uppercase tracking-wider text-emerald-300">
-              Confirmar pago
+              {pend.kind === "pago"
+                ? "Confirmar pago"
+                : pend.kind === "recordatorio"
+                  ? "Confirmar aviso"
+                  : "Confirmar pago realizado"}
             </p>
-            <div className="mt-2 space-y-1 text-sm">
-              <p>
-                <Badge tone={pend.pago.tipo === "ingreso" ? "green" : "zinc"}>
-                  {pend.pago.tipo}
-                </Badge>{" "}
-                <span className="tnum text-lg font-semibold">
-                  {fmtUSD(Math.round(pend.pago.monto * 100))}
-                </span>
-              </p>
-              <p className="text-zinc-300">
-                {pend.pago.descripcion || "Sin descripción"}
-              </p>
-              <p className="tnum text-xs text-zinc-500">
-                {fmtFecha(pend.pago.fecha)} ·{" "}
-                {pend.categoriaNombre ?? "Sin categoría"} ·{" "}
-                {pend.pago.fecha > todayLocal() ? "pendiente" : "pagado"}
-              </p>
-            </div>
+            {pend.kind === "pago" && (
+              <div className="mt-2 space-y-1 text-sm">
+                <p>
+                  <Badge tone={pend.pago.tipo === "ingreso" ? "green" : "zinc"}>
+                    {pend.pago.tipo}
+                  </Badge>{" "}
+                  <span className="tnum text-lg font-semibold">
+                    {fmtUSD(Math.round(pend.pago.monto * 100))}
+                  </span>
+                </p>
+                <p className="text-zinc-300">
+                  {pend.pago.descripcion || "Sin descripción"}
+                </p>
+                <p className="tnum text-xs text-zinc-500">
+                  {fmtFecha(pend.pago.fecha)} ·{" "}
+                  {pend.categoriaNombre ?? "Sin categoría"} ·{" "}
+                  {pend.pago.fecha > todayLocal() ? "pendiente" : "pagado"}
+                </p>
+              </div>
+            )}
+            {pend.kind === "recordatorio" && (
+              <div className="mt-2 space-y-1 text-sm">
+                <p className="font-medium">{pend.input.titulo}</p>
+                <p className="tnum text-xs text-zinc-500">
+                  {fmtFechaHora(pend.input.fecha_hora)}
+                  {pend.input.repetir !== "none"
+                    ? ` · ${pend.input.repetir}`
+                    : ""}
+                </p>
+                {pend.input.detalle && (
+                  <p className="text-zinc-400">{pend.input.detalle}</p>
+                )}
+              </div>
+            )}
+            {pend.kind === "marcar" && (
+              <div className="mt-2 space-y-1 text-sm">
+                <p className="font-medium">
+                  {pend.pago.descripcion || "Pago sin descripción"}
+                </p>
+                <p className="tnum text-xs text-zinc-500">
+                  {fmtUSD(pend.pago.monto_cents)} · {fmtFecha(pend.pago.fecha)}
+                </p>
+              </div>
+            )}
             <div className="mt-3 flex gap-2">
               <button
                 onClick={() => void confirmar()}
                 disabled={busy}
                 className={`${btnPrimary} flex-1`}
               >
-                Confirmar y guardar
+                Confirmar
               </button>
               <button
                 onClick={() => setPend(null)}
@@ -346,7 +514,7 @@ export default function Asistente({ onIrConfig }: { onIrConfig: () => void }) {
       )}
 
       <div className="mt-3 flex gap-1.5">
-        {(["chat", "registro"] as const).map((v) => (
+        {(["chat", "acciones"] as const).map((v) => (
           <button
             key={v}
             onClick={() => setModo(v)}
@@ -356,7 +524,7 @@ export default function Asistente({ onIrConfig }: { onIrConfig: () => void }) {
                 : "text-zinc-500 hover:text-zinc-300"
             }`}
           >
-            {v === "chat" ? "Conversar" : "Registrar pago"}
+            {v === "chat" ? "Conversar" : "Hacer algo"}
           </button>
         ))}
       </div>
@@ -371,8 +539,8 @@ export default function Asistente({ onIrConfig }: { onIrConfig: () => void }) {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder={
-            modo === "registro"
-              ? "Ej. Pagué $45 de luz ayer…"
+            modo === "acciones"
+              ? "Ej. Pagué $45 de luz ayer · Marca el Netflix como pagado…"
               : "Ej. ¿Cuánto gasté en comida?…"
           }
           aria-label="Mensaje"
@@ -387,7 +555,7 @@ export default function Asistente({ onIrConfig }: { onIrConfig: () => void }) {
         </button>
       </form>
       <p className="mt-2 text-center text-[11px] text-zinc-600">
-        El asistente puede equivocarse: confirma montos y fechas antes de guardar.
+        Aura puede equivocarse: confirma montos y fechas antes de guardar.
       </p>
     </div>
   );

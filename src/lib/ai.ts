@@ -107,6 +107,50 @@ export async function testConnection(cfg: AiConfig): Promise<string> {
   }
 }
 
+// ── Identidad y prompts ──────────────────────────────────────────────
+
+export const IDENTIDAD = [
+  "Eres Aura, la asistente financiera de RemindPay (app de escritorio 100% local, USD).",
+  "Tu responsabilidad: ayudar al usuario a controlar su dinero con datos reales: registrar pagos, recordar vencimientos, planificar quincenas y alertar riesgos.",
+  "Hablas español, breve y directa, sin adornos ni emojis.",
+  "Conoces la app: Dashboard (balance, próximos pagos, presupuestos, gráfico), Pagos (pagados/pendientes, recurrentes, comprobantes), Deudas (abonos), Planificador (simula la quincena), Recordatorios (avisos con sonido), Contactos, Configuración.",
+  "Reglas: nunca inventes cifras — solo las del contexto que se te da. Montos en USD. Fechas absolutas yyyy-MM-dd. Nada se guarda sin confirmación del usuario (la app la gestiona). Si algo está fuera de tu alcance, dilo en una frase y sugiere la alternativa más cercana.",
+].join("\n");
+
+export function promptChatSistema(contexto: string): string {
+  return `${IDENTIDAD}\nHablas con los datos de abajo como única fuente de verdad.\n${contexto}`;
+}
+
+export function promptAccionesSistema(
+  categorias: string[],
+  pendientes: string[],
+): string {
+  return [
+    IDENTIDAD,
+    "Modo acciones: conviertes el pedido del usuario en UNA acción JSON. Acciones disponibles:",
+    '1. {"accion":"registrar_pago","params":{"tipo":"ingreso"|"gasto","monto":12.5,"fecha":"2026-09-11","categoria":"Comida"|null,"descripcion":"..."}}',
+    '2. {"accion":"crear_recordatorio","params":{"titulo":"...","detalle":"","fecha_hora":"2026-09-12T09:00","repetir":"none"|"daily"|"weekly"|"monthly","sonido":true,"persistente":true}}',
+    '3. {"accion":"marcar_pagado","params":{"id":123}}',
+    `Hoy: ${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-${String(new Date().getDate()).padStart(2, "0")}. Fechas relativas ("ayer", "el lunes", "el 15") → absolutas yyyy-MM-dd / yyyy-MM-ddTHH:mm.`,
+    `Categorías: [${categorias.join(", ")}] (la más cercana o null).`,
+    pendientes.length > 0
+      ? `Pagos pendientes (para marcar_pagado usa SOLO estos ids):\n${pendientes.join("\n")}`
+      : "No hay pagos pendientes.",
+    'Responde SOLO el JSON, sin markdown. Si falta info o hay ambigüedad: {"error":"pregunta corta"}.',
+  ].join("\n");
+}
+
+export function promptMonitorSistema(): string {
+  return [
+    IDENTIDAD,
+    "Rol ahora: monitor silencioso. Con los datos de abajo devuelve SOLO JSON válido, sin markdown:",
+    '{"alertas":[{"nivel":"urgente"|"aviso"|"info","texto":"..."}]}',
+    "Máximo 4 alertas, solo accionables con cifras concretas del contexto (vencimientos, presupuestos al límite, sobregiros, patrones raros). Nada genérico ni motivacional. Si todo está bien: {\"alertas\":[]}.",
+  ].join("\n");
+}
+
+// ── Acciones ─────────────────────────────────────────────────────────
+
 export interface PagoExtraido {
   tipo: "ingreso" | "gasto";
   monto: number;
@@ -115,39 +159,109 @@ export interface PagoExtraido {
   descripcion: string;
 }
 
-/** Extrae el JSON de un pago de la respuesta del modelo (tolera fences). */
-export function parsePagoJSON(texto: string): PagoExtraido {
+export interface RecordatorioExtraido {
+  titulo: string;
+  detalle: string;
+  fecha_hora: string;
+  repetir: string;
+  sonido: boolean;
+  persistente: boolean;
+}
+
+export type AccionIA =
+  | { accion: "registrar_pago"; params: PagoExtraido }
+  | { accion: "crear_recordatorio"; params: RecordatorioExtraido }
+  | { accion: "marcar_pagado"; params: { id: number } };
+
+function extraerJSON(texto: string): Record<string, unknown> {
   const limpio = texto
     .replace(/```json\s*/gi, "")
     .replace(/```/g, "")
     .trim();
   const ini = limpio.indexOf("{");
   const fin = limpio.lastIndexOf("}");
-  if (ini < 0 || fin <= ini) throw new Error("No entendí el pago. Dime monto y fecha.");
-  let obj: unknown;
+  if (ini < 0 || fin <= ini) throw new Error("no-json");
   try {
-    obj = JSON.parse(limpio.slice(ini, fin + 1));
+    const obj: unknown = JSON.parse(limpio.slice(ini, fin + 1));
+    if (typeof obj !== "object" || obj === null) throw new Error("no-json");
+    return obj as Record<string, unknown>;
   } catch {
-    throw new Error("No entendí el pago. Dime monto y fecha.");
+    throw new Error("no-json");
   }
-  if (typeof obj !== "object" || obj === null) {
-    throw new Error("No entendí el pago. Dime monto y fecha.");
+}
+
+function validarPago(o: Record<string, unknown>): PagoExtraido {
+  if (o["tipo"] !== "ingreso" && o["tipo"] !== "gasto") {
+    throw new Error("¿Es ingreso o gasto?");
   }
-  const o = obj as Record<string, unknown>;
-  if (o["error"] != null && o["tipo"] == null) {
-    throw new Error(typeof o["error"] === "string" ? o["error"] : "Faltan datos del pago.");
-  }
-  const tipo = o["tipo"];
   const monto = o["monto"];
-  const fecha = o["fecha"];
-  if (tipo !== "ingreso" && tipo !== "gasto") throw new Error("Tipo no claro (¿ingreso o gasto?).");
   if (typeof monto !== "number" || !Number.isFinite(monto) || monto <= 0) {
-    throw new Error("Monto no claro. ¿Cuánto fue?");
+    throw new Error("¿Por cuánto fue?");
   }
+  const fecha = o["fecha"];
   if (typeof fecha !== "string" || fecha.length !== 10) {
-    throw new Error("Fecha no clara. ¿Qué día fue?");
+    throw new Error("¿Qué día fue?");
   }
-  const categoria = typeof o["categoria"] === "string" ? o["categoria"] : null;
-  const descripcion = typeof o["descripcion"] === "string" ? o["descripcion"] : "";
-  return { tipo, monto, fecha, categoria, descripcion };
+  return {
+    tipo: o["tipo"],
+    monto,
+    fecha,
+    categoria: typeof o["categoria"] === "string" ? o["categoria"] : null,
+    descripcion: typeof o["descripcion"] === "string" ? o["descripcion"] : "",
+  };
+}
+
+function validarRecordatorio(o: Record<string, unknown>): RecordatorioExtraido {
+  const titulo =
+    typeof o["titulo"] === "string" ? o["titulo"].trim() : "";
+  if (!titulo) throw new Error("¿Qué te recuerdo?");
+  const fh = o["fecha_hora"];
+  if (typeof fh !== "string" || fh.length !== 16) {
+    throw new Error("¿Para qué día y hora?");
+  }
+  const rep = typeof o["repetir"] === "string" ? o["repetir"] : "none";
+  if (!["none", "daily", "weekly", "monthly"].includes(rep)) {
+    throw new Error("Repetición no válida.");
+  }
+  return {
+    titulo: titulo.slice(0, 140),
+    detalle: typeof o["detalle"] === "string" ? o["detalle"].slice(0, 500) : "",
+    fecha_hora: fh,
+    repetir: rep,
+    sonido: o["sonido"] !== false,
+    persistente: o["persistente"] !== false,
+  };
+}
+
+/** Interpreta la respuesta del modelo como acción (o pregunta si falta info). */
+export function parseAccionJSON(texto: string): AccionIA {
+  let o: Record<string, unknown>;
+  try {
+    o = extraerJSON(texto);
+  } catch {
+    throw new Error("No entendí. Dime qué quieres hacer.");
+  }
+  if (o["error"] != null && o["accion"] == null) {
+    throw new Error(
+      typeof o["error"] === "string" ? o["error"] : "Falta información.",
+    );
+  }
+  const a = o["accion"];
+  const p = o["params"];
+  if (typeof p !== "object" || p === null) {
+    throw new Error("No entendí. Dime qué quieres hacer.");
+  }
+  const params = p as Record<string, unknown>;
+  if (a === "registrar_pago") return { accion: a, params: validarPago(params) };
+  if (a === "crear_recordatorio") {
+    return { accion: a, params: validarRecordatorio(params) };
+  }
+  if (a === "marcar_pagado") {
+    const id = params["id"];
+    if (typeof id !== "number" || !Number.isInteger(id) || id <= 0) {
+      throw new Error("¿Cuál pago? Dime la descripción.");
+    }
+    return { accion: a, params: { id } };
+  }
+  throw new Error("No entendí. Dime qué quieres hacer.");
 }
