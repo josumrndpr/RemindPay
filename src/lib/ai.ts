@@ -96,8 +96,12 @@ export async function chatCompletion(
       }),
       signal: opts?.signal,
     });
-  } catch {
-    throw new Error("No se pudo contactar el endpoint. Revisa la URL y tu conexión.");
+  } catch (e) {
+    const detalle =
+      e instanceof Error && e.message ? `: ${e.message.slice(0, 160)}` : "";
+    throw new Error(
+      `No se pudo contactar el endpoint. Revisa la URL y tu conexión${detalle}.`,
+    );
   }
   if (!res.ok) {
     let detalle = "";
