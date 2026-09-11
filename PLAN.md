@@ -42,6 +42,7 @@ Sidebar: Dashboard / Pagos / Deudas / Recordatorios / Contactos / Config. PIN ga
 - [x] **0.5.0** — Aura con identidad (rol, responsabilidad, conocimiento de la app) + acciones confirmadas (registrar pago, crear aviso, marcar pagado por id) + monitoreo con alertas (chequeo 1×/sesión al desbloquear, tarjeta en Asistente, urgentes con notificación + sonido).
 - [x] **0.5.1** — Fix conexión IA: normaliza endpoint (acepta URL completa), peticiones vía plugin HTTP (sin CORS) + plugin registrado. Valores correctos Zen: base `https://opencode.ai/zen/v1`, modelo `mimo-v2.5-free`.
 - [x] **0.5.2** — Go: headers `x-opencode-session` + UA exigidos por doc + errores con mensaje real del servidor. Go válido: base `https://opencode.ai/zen/go/v1`, modelo `mimo-v2.5`.
+- [x] **0.5.3** — Config centrada en Go/Zen (botones preset, placeholders reales). Sin simulación: la IA siempre es HTTPS real o error real.
 
 ## Requisito de máquina (Windows)
 Para `tauri dev` / `tauri build` hace falta VS 2022 con workload **"Desarrollo para el escritorio con C++"** + WebView2 (ya lo tienes). Sin eso: `npm run dev` (solo web) y `cargo check` sí funcionan. Instálalo desde Visual Studio Installer → Modificar → marcar C++ → Instalar (~6GB).

@@ -372,15 +372,35 @@ export default function Config() {
 
         <Section
           icon="sparkles"
-          title="Asistente IA"
-          hint="Endpoint OpenAI-compatible + clave. Opcional."
+          title="OpenCode Go / Zen"
+          hint="Tu clave de opencode.ai/auth. Opcional."
         >
           <div className="space-y-2.5">
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => {
+                  setAiEndpoint("https://opencode.ai/zen/go/v1");
+                  setAiMsg(null);
+                }}
+                className={btnSecondary}
+              >
+                Usar Go
+              </button>
+              <button
+                onClick={() => {
+                  setAiEndpoint("https://opencode.ai/zen/v1");
+                  setAiMsg(null);
+                }}
+                className={btnSecondary}
+              >
+                Usar Zen
+              </button>
+            </div>
             <Field label="Endpoint (base URL)">
               <input
                 value={aiEndpoint}
                 onChange={(e) => setAiEndpoint(e.target.value)}
-                placeholder="https://api.ejemplo.com/v1"
+                placeholder="https://opencode.ai/zen/go/v1"
                 inputMode="url"
                 className={`${inputCls} font-mono !text-xs`}
               />
@@ -390,7 +410,7 @@ export default function Config() {
                 type="password"
                 value={aiKey}
                 onChange={(e) => setAiKey(e.target.value)}
-                placeholder="sk-… (se guarda solo en tu PC)"
+                placeholder="Tu clave de opencode.ai/auth (solo vive en tu PC)"
                 className={`${inputCls} font-mono !text-xs`}
               />
             </Field>
@@ -398,7 +418,7 @@ export default function Config() {
               <input
                 value={aiModel}
                 onChange={(e) => setAiModel(e.target.value)}
-                placeholder="ej. gpt-4o-mini, llama-3.1-8b…"
+                placeholder="Go: mimo-v2.5 · Zen: mimo-v2.5-free"
                 className={inputCls}
               />
             </Field>
@@ -422,8 +442,8 @@ export default function Config() {
               </button>
             </div>
             <p className="text-xs text-zinc-500">
-              Solo hablas con tu endpoint. Sin configurar, la app sigue 100%
-              local.
+              Aura habla directo con tu endpoint por HTTPS. Sin configurar,
+              la app sigue 100% local.
             </p>
           </div>
         </Section>
@@ -507,7 +527,7 @@ export default function Config() {
         )}
 
         <div className="flex items-center gap-3 px-1 py-2 text-xs text-zinc-600">
-          <span>RemindPay 0.5.2 · 100% local · SQLite · USD</span>
+          <span>RemindPay 0.5.3 · 100% local · SQLite · USD</span>
         </div>
       </div>
     </div>
