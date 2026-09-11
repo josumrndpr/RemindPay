@@ -58,6 +58,12 @@ export interface ChatMsg {
   content: string;
 }
 
+// Sesión estable (OpenCode Go la pide para enrutar y cachear).
+const SESION_IA =
+  typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `sesion-${Date.now()}`;
+
 export interface ChatUsage {
   prompt_tokens?: number;
   completion_tokens?: number;
@@ -78,6 +84,8 @@ export async function chatCompletion(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "User-Agent": "RemindPay",
+        "x-opencode-session": SESION_IA,
         ...(cfg.key ? { Authorization: `Bearer ${cfg.key}` } : {}),
       },
       body: JSON.stringify({
@@ -92,13 +100,36 @@ export async function chatCompletion(
     throw new Error("No se pudo contactar el endpoint. Revisa la URL y tu conexión.");
   }
   if (!res.ok) {
+    let detalle = "";
+    try {
+      detalle = (await res.text()).slice(0, 200);
+    } catch {
+      /* sin cuerpo */
+    }
+    let msg = "";
+    try {
+      const j = JSON.parse(detalle) as {
+        error?: { message?: unknown };
+        message?: unknown;
+      };
+      const m = j?.error?.message ?? j?.message;
+      if (typeof m === "string" && m.trim()) msg = m.trim();
+    } catch {
+      /* no es JSON */
+    }
     if (res.status === 401 || res.status === 403) {
-      throw new Error("Clave inválida (401/403). Revísala en Configuración.");
+      throw new Error(
+        `Clave inválida o sin permiso (${res.status})${msg ? `: ${msg}` : ". Revísala en Configuración."}`,
+      );
     }
     if (res.status === 404) {
-      throw new Error("Endpoint o modelo no encontrado (404).");
+      throw new Error(
+        `Endpoint o modelo no encontrado (404)${msg ? `: ${msg}` : "."}`,
+      );
     }
-    throw new Error(`El endpoint devolvió error ${res.status}.`);
+    throw new Error(
+      `El endpoint devolvió error ${res.status}${msg ? `: ${msg}` : "."}`,
+    );
   }
   const data = (await res
     .json()
