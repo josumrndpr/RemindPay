@@ -3,6 +3,7 @@
 // Solo se usa si el usuario configura endpoint en Configuración. Sin eso,
 // la app sigue 100% local.
 import { getSetting } from "./api";
+import { isPreview } from "./api";
 
 export interface AiConfig {
   endpoint: string;
@@ -17,7 +18,7 @@ export async function getAiConfig(): Promise<AiConfig> {
     getSetting("ai_model"),
   ]);
   return {
-    endpoint: (endpoint ?? "").trim().replace(/\/+$/, ""),
+    endpoint: normalizarEndpoint(endpoint ?? ""),
     key: (key ?? "").trim(),
     model: (model ?? "").trim(),
   };
@@ -25,6 +26,31 @@ export async function getAiConfig(): Promise<AiConfig> {
 
 export function isAiConfigured(cfg: AiConfig): boolean {
   return cfg.endpoint.length > 0 && cfg.model.length > 0;
+}
+
+/** Acepta base URL o URL completa: recorta /chat/completions y slashes. */
+export function normalizarEndpoint(url: string): string {
+  return url
+    .trim()
+    .replace(/\/+$/, "")
+    .replace(/\/chat\/completions$/, "")
+    .replace(/\/+$/, "");
+}
+
+/**
+ * fetch sin CORS en la app instalada (plugin HTTP → Rust) y fetch normal
+ * en vista previa web.
+ */
+async function httpFetch(input: string, init: RequestInit): Promise<Response> {
+  if (!isPreview()) {
+    try {
+      const { fetch: tFetch } = await import("@tauri-apps/plugin-http");
+      return (await tFetch(input, init)) as Response;
+    } catch {
+      /* cae al fetch del webview */
+    }
+  }
+  return fetch(input, init);
 }
 
 export interface ChatMsg {
@@ -48,7 +74,7 @@ export async function chatCompletion(
   }
   let res: Response;
   try {
-    res = await fetch(`${cfg.endpoint}/chat/completions`, {
+    res = await httpFetch(`${cfg.endpoint}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -88,11 +114,12 @@ export async function chatCompletion(
 }
 
 export async function testConnection(cfg: AiConfig): Promise<string> {
+  const base = normalizarEndpoint(cfg.endpoint);
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 30000);
   try {
     const r = await chatCompletion(
-      cfg,
+      { ...cfg, endpoint: base },
       [{ role: "user", content: "Responde con solo: ok" }],
       { maxTokens: 5, temperature: 0, signal: ctrl.signal },
     );

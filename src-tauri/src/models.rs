@@ -20,6 +20,7 @@ pub struct Payment {
 }
 
 impl Payment {
+    #[allow(dead_code)]
     pub fn es_plantilla(&self) -> bool {
         self.recurrente != "none" && self.serie_id.is_none()
     }
