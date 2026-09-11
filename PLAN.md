@@ -38,6 +38,7 @@ Sidebar: Dashboard / Pagos / Deudas / Recordatorios / Contactos / Config. PIN ga
 - [x] **Fase 4** — PIN Argon2id (crear/pedir/cambiar/bloquear) + ajustes genéricos + respaldos diarios automáticos (VACUUM INTO, últimas 30) + export CSV + tema oscuro/claro + NSIS. Compilado y verificado (nota: el PIN es puerta de acceso, no cifrado del archivo).
 - [x] **0.2.0** — Comprobantes (PNG/JPG/WEBP/PDF ≤10MB) + recurrentes automáticos al abrir (calendario manual, serie_id, migración user_version) + presupuestos por categoría + gráfico 6 meses SVG. 18 tests. Instalador NSIS.
 - [x] **0.3.0** — Pagado vs pendiente (los futuros no tocan balance; migración v3 auto) + "Próximos pagos" en Dashboard con "Ya lo pagué" + Planificador de quincena (fondo + paydays + extras, orden por vencimiento, sobrante, marcar pagados). 21 tests.
+- [x] **0.4.0** — Asistente IA opcional (cliente OpenAI-compatible genérico: endpoint + key + modelo en Config con probar-conexión) + chat con contexto real del mes + registro de pagos por lenguaje natural con tarjeta de confirmación. Sin config, todo sigue 100% local.
 
 ## Requisito de máquina (Windows)
 Para `tauri dev` / `tauri build` hace falta VS 2022 con workload **"Desarrollo para el escritorio con C++"** + WebView2 (ya lo tienes). Sin eso: `npm run dev` (solo web) y `cargo check` sí funcionan. Instálalo desde Visual Studio Installer → Modificar → marcar C++ → Instalar (~6GB).

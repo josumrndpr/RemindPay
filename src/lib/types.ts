@@ -170,5 +170,6 @@ export type Section =
   | "deudas"
   | "planificador"
   | "recordatorios"
+  | "asistente"
   | "contactos"
   | "config";

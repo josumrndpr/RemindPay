@@ -15,6 +15,7 @@ import {
   verifyPin,
   setPin,
 } from "../lib/api";
+import { testConnection } from "../lib/ai";
 import {
   ahoraArchivo,
   fmtBackupFecha,
@@ -44,7 +45,7 @@ function Section({
   hint,
   children,
 }: {
-  icon: "sliders" | "lock" | "database" | "download" | "bell" | "sun";
+  icon: "sliders" | "lock" | "sparkles" | "database" | "download" | "bell" | "sun";
   title: string;
   hint: string;
   children: ReactNode;
@@ -106,19 +107,30 @@ export default function Config() {
   const [pinNuevo, setPinNuevo] = useState("");
   const [pinConf, setPinConf] = useState("");
 
+  const [aiEndpoint, setAiEndpoint] = useState("");
+  const [aiKey, setAiKey] = useState("");
+  const [aiModel, setAiModel] = useState("");
+  const [aiMsg, setAiMsg] = useState<string | null>(null);
+
   useEffect(() => {
     void (async () => {
       try {
-        const [a, d, t, b] = await Promise.all([
+        const [a, d, t, b, e, k, m] = await Promise.all([
           isAutostart(),
           getDataDir(),
           getSetting("tema"),
           listBackups(),
+          getSetting("ai_endpoint"),
+          getSetting("ai_key"),
+          getSetting("ai_model"),
         ]);
         setAuto(a);
         setDir(d);
         if (t === "claro" || t === "oscuro") setTema(t);
         setBackups(b);
+        setAiEndpoint(e ?? "");
+        setAiKey(k ?? "");
+        setAiModel(m ?? "");
       } catch (e) {
         setMsg(String(e));
       }
@@ -178,6 +190,39 @@ export default function Config() {
       flash("PIN actualizado");
     } catch (e) {
       fail(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function guardarAi() {
+    setBusy(true);
+    try {
+      await Promise.all([
+        setSetting("ai_endpoint", aiEndpoint.trim().replace(/\/+$/, "")),
+        setSetting("ai_key", aiKey.trim()),
+        setSetting("ai_model", aiModel.trim()),
+      ]);
+      flash("Asistente configurado");
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function probarAi() {
+    setBusy(true);
+    setAiMsg(null);
+    try {
+      const r = await testConnection({
+        endpoint: aiEndpoint.trim().replace(/\/+$/, ""),
+        key: aiKey.trim(),
+        model: aiModel.trim(),
+      });
+      setAiMsg(r);
+    } catch (e) {
+      setAiMsg(String(e));
     } finally {
       setBusy(false);
     }
@@ -326,6 +371,64 @@ export default function Config() {
         </Section>
 
         <Section
+          icon="sparkles"
+          title="Asistente IA"
+          hint="Endpoint OpenAI-compatible + clave. Opcional."
+        >
+          <div className="space-y-2.5">
+            <Field label="Endpoint (base URL)">
+              <input
+                value={aiEndpoint}
+                onChange={(e) => setAiEndpoint(e.target.value)}
+                placeholder="https://api.ejemplo.com/v1"
+                inputMode="url"
+                className={`${inputCls} font-mono !text-xs`}
+              />
+            </Field>
+            <Field label="API key">
+              <input
+                type="password"
+                value={aiKey}
+                onChange={(e) => setAiKey(e.target.value)}
+                placeholder="sk-… (se guarda solo en tu PC)"
+                className={`${inputCls} font-mono !text-xs`}
+              />
+            </Field>
+            <Field label="Modelo">
+              <input
+                value={aiModel}
+                onChange={(e) => setAiModel(e.target.value)}
+                placeholder="ej. gpt-4o-mini, llama-3.1-8b…"
+                className={inputCls}
+              />
+            </Field>
+            {aiMsg && (
+              <p className="text-xs text-zinc-400">{aiMsg}</p>
+            )}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => void guardarAi()}
+                disabled={busy}
+                className={btnSecondary}
+              >
+                Guardar
+              </button>
+              <button
+                onClick={() => void probarAi()}
+                disabled={busy}
+                className={btnSecondary}
+              >
+                Probar conexión
+              </button>
+            </div>
+            <p className="text-xs text-zinc-500">
+              Solo hablas con tu endpoint. Sin configurar, la app sigue 100%
+              local.
+            </p>
+          </div>
+        </Section>
+
+        <Section
           icon="database"
           title="Respaldos"
           hint="Copia diaria automática · se conservan las últimas 30"
@@ -404,7 +507,7 @@ export default function Config() {
         )}
 
         <div className="flex items-center gap-3 px-1 py-2 text-xs text-zinc-600">
-          <span>RemindPay 0.3.0 · 100% local · SQLite · USD</span>
+          <span>RemindPay 0.4.0 · 100% local · SQLite · USD</span>
         </div>
       </div>
     </div>
