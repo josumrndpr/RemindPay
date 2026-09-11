@@ -1,6 +1,7 @@
 // RemindPay — barra de título propia (ventana sin decoración nativa).
-// Arrastre MANUAL (setPosition): el arrastre del SO falló en esta máquina,
-// así no dependemos de él. En vista previa web no se muestra.
+// Arrastre MANUAL con Pointer Capture: los eventos siguen llegando aunque
+// el mouse salga de la ventana, y el drag termina siempre en pointerup.
+// En vista previa web no se muestra.
 import { useEffect, useState } from "react";
 import { PhysicalPosition } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -34,8 +35,17 @@ function WinBtn({
   );
 }
 
+interface DragState {
+  startX: number;
+  startY: number;
+  winX: number;
+  winY: number;
+  scale: number;
+}
+
 export default function Titlebar() {
   const [max, setMax] = useState(false);
+  const [drag, setDrag] = useState<DragState | null>(null);
 
   useEffect(() => {
     if (isPreview()) return;
@@ -64,8 +74,7 @@ export default function Titlebar() {
     }
   }
 
-  // Arrastre manual: guarda el punto inicial y mueve la ventana con el mouse.
-  async function empezarArrastre(e: React.MouseEvent) {
+  async function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     if (e.button !== 0) return;
     if ((e.target as HTMLElement).closest("button")) return;
     try {
@@ -73,32 +82,54 @@ export default function Titlebar() {
       if (await w.isMaximized()) return;
       const pos = await w.outerPosition();
       const scale = await w.scaleFactor();
-      const startX = e.screenX;
-      const startY = e.screenY;
-      const mover = (ev: MouseEvent) => {
-        const x = Math.round(pos.x + (ev.screenX - startX) * scale);
-        const y = Math.round(pos.y + (ev.screenY - startY) * scale);
-        void w
-          .setPosition(new PhysicalPosition(x, y))
-          .catch(() => {});
-      };
-      const soltar = () => {
-        window.removeEventListener("mousemove", mover);
-        window.removeEventListener("mouseup", soltar);
-      };
-      window.addEventListener("mousemove", mover);
-      window.addEventListener("mouseup", soltar);
+      setDrag({
+        startX: e.screenX,
+        startY: e.screenY,
+        winX: pos.x,
+        winY: pos.y,
+        scale,
+      });
+      e.currentTarget.setPointerCapture(e.pointerId);
     } catch {
       /* sin ventana nativa */
+    }
+  }
+
+  function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!drag) return;
+    // Seguridad: si el botón ya no está presionado, terminar.
+    if ((e.buttons & 1) === 0) {
+      setDrag(null);
+      return;
+    }
+    const x = Math.round(drag.winX + (e.screenX - drag.startX) * drag.scale);
+    const y = Math.round(drag.winY + (e.screenY - drag.startY) * drag.scale);
+    void win()
+      .setPosition(new PhysicalPosition(x, y))
+      .catch(() => {});
+  }
+
+  function terminarDrag(e: React.PointerEvent<HTMLDivElement>) {
+    if (!drag) return;
+    setDrag(null);
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      /* ya liberado */
     }
   }
 
   return (
     <div
       data-tauri-drag-region
-      onMouseDown={(e) => void empezarArrastre(e)}
+      onPointerDown={(e) => void onPointerDown(e)}
+      onPointerMove={onPointerMove}
+      onPointerUp={terminarDrag}
+      onPointerCancel={terminarDrag}
       onDoubleClick={() => void toggleMax()}
-      className="flex h-10 shrink-0 select-none items-center gap-2 border-b border-zinc-800/80 bg-zinc-900/70 py-1 pl-3 pr-1.5"
+      className="flex h-10 shrink-0 touch-none select-none items-center gap-2 border-b border-zinc-800/80 bg-zinc-900/70 py-1 pl-3 pr-1.5"
     >
       <span data-tauri-drag-region className="flex items-center gap-2">
         <Logo size={20} />
