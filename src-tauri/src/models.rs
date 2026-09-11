@@ -14,7 +14,14 @@ pub struct Payment {
     pub contacto_id: Option<i64>,
     pub comprobante_path: String,
     pub recurrente: String,
+    pub serie_id: Option<i64>,
     pub created_at: String,
+}
+
+impl Payment {
+    pub fn es_plantilla(&self) -> bool {
+        self.recurrente != "none" && self.serie_id.is_none()
+    }
 }
 
 /// Lo que envía el frontend: monto en dólares, Rust lo pasa a centavos.
@@ -26,6 +33,8 @@ pub struct NewPayment {
     pub categoria_id: Option<i64>,
     pub contacto_id: Option<i64>,
     pub descripcion: String,
+    pub recurrente: String,
+    pub comprobante_path: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -176,4 +185,22 @@ pub struct BackupInfo {
     pub nombre: String,
     pub bytes: u64,
     pub creado_secs: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BudgetView {
+    pub id: i64,
+    pub categoria_id: i64,
+    pub categoria: String,
+    pub color: String,
+    pub monto_cents: i64,
+    pub gastado_cents: i64,
+    pub pct: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MonthPoint {
+    pub mes: String,
+    pub ingresos_cents: i64,
+    pub gastos_cents: i64,
 }

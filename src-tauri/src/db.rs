@@ -14,6 +14,7 @@ use argon2::{
 };
 use rusqlite::{params, Connection, Row};
 
+use crate::models::{BudgetView, MonthPoint};
 const SCHEMA: &str = include_str!("../schema.sql");
 
 const SEED_CATEGORIES: &[(&str, &str, &str)] = &[
@@ -43,6 +44,34 @@ pub fn init(conn: &Connection) -> Result<(), String> {
         )
         .map_err(|e| format!("seed: {e}"))?;
     }
+    // Migración v2: serie de recurrentes (DBs creadas antes de esta versión).
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .map_err(|e| format!("version: {e}"))?;
+    if version < 2 {
+        let mut tiene = false;
+        {
+            let empty: &[&dyn rusqlite::ToSql] = &[];
+            let mut stmt = conn
+                .prepare("PRAGMA table_info(payments)")
+                .map_err(|e| format!("migrar: {e}"))?;
+            let cols = stmt
+                .query_map(empty, |r| r.get::<_, String>(1))
+                .map_err(|e| format!("migrar: {e}"))?;
+            for c in cols {
+                if c.map_err(|e| format!("migrar: {e}"))? == "serie_id" {
+                    tiene = true;
+                    break;
+                }
+            }
+        }
+        if !tiene {
+            conn.execute_batch("ALTER TABLE payments ADD COLUMN serie_id INTEGER")
+                .map_err(|e| format!("migrar serie_id: {e}"))?;
+        }
+        conn.execute_batch("PRAGMA user_version = 2")
+            .map_err(|e| format!("version: {e}"))?;
+    }
     Ok(())
 }
 
@@ -67,8 +96,8 @@ fn fecha_valida(fecha: &str) -> bool {
 
 // ── Pagos ────────────────────────────────────────────────────────────────
 
-/// Valida un pago y devuelve el monto en centavos USD.
-pub fn validate(input: &NewPayment) -> Result<i64, String> {
+/// Valida un pago y devuelve (centavos, recurrencia normalizada).
+pub fn validate(input: &NewPayment) -> Result<(i64, String), String> {
     if input.tipo != "ingreso" && input.tipo != "gasto" {
         return Err("tipo inválido".into());
     }
@@ -79,7 +108,15 @@ pub fn validate(input: &NewPayment) -> Result<i64, String> {
     if input.descripcion.trim().len() > 280 {
         return Err("descripción muy larga (máx 280)".into());
     }
-    Ok(cents)
+    let rec = match input.recurrente.as_str() {
+        "" | "none" => "none".to_string(),
+        "daily" | "weekly" | "monthly" => input.recurrente.clone(),
+        _ => return Err("repetición inválida".into()),
+    };
+    if input.comprobante_path.len() > 120 {
+        return Err("comprobante inválido".into());
+    }
+    Ok((cents, rec))
 }
 
 fn row_to_payment(row: &Row) -> rusqlite::Result<Payment> {
@@ -94,11 +131,12 @@ fn row_to_payment(row: &Row) -> rusqlite::Result<Payment> {
         contacto_id: row.get(7)?,
         comprobante_path: row.get(8)?,
         recurrente: row.get(9)?,
+        serie_id: row.get(11)?,
         created_at: row.get(10)?,
     })
 }
 
-const PAYMENT_SELECT: &str = "SELECT p.id, p.tipo, p.monto_cents, p.fecha, p.categoria_id, c.nombre, p.descripcion, p.contacto_id, p.comprobante_path, p.recurrente, p.created_at FROM payments p LEFT JOIN categories c ON c.id = p.categoria_id";
+const PAYMENT_SELECT: &str = "SELECT p.id, p.tipo, p.monto_cents, p.fecha, p.categoria_id, c.nombre, p.descripcion, p.contacto_id, p.comprobante_path, p.recurrente, p.created_at, p.serie_id FROM payments p LEFT JOIN categories c ON c.id = p.categoria_id";
 
 pub fn get_payment(conn: &Connection, id: i64) -> Result<Payment, String> {
     conn.query_row(
@@ -110,16 +148,18 @@ pub fn get_payment(conn: &Connection, id: i64) -> Result<Payment, String> {
 }
 
 pub fn insert_payment(conn: &Connection, input: &NewPayment) -> Result<Payment, String> {
-    let cents = validate(input)?;
+    let (cents, rec) = validate(input)?;
     conn.execute(
-        "INSERT INTO payments (tipo, monto_cents, fecha, categoria_id, contacto_id, descripcion) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO payments (tipo, monto_cents, fecha, categoria_id, contacto_id, descripcion, recurrente, comprobante_path) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
             input.tipo,
             cents,
             input.fecha,
             input.categoria_id,
             input.contacto_id,
-            input.descripcion.trim()
+            input.descripcion.trim(),
+            rec,
+            input.comprobante_path.trim()
         ],
     )
     .map_err(|e| format!("insert: {e}"))?;
@@ -127,10 +167,10 @@ pub fn insert_payment(conn: &Connection, input: &NewPayment) -> Result<Payment, 
 }
 
 pub fn update_payment(conn: &Connection, id: i64, input: &NewPayment) -> Result<Payment, String> {
-    let cents = validate(input)?;
+    let (cents, rec) = validate(input)?;
     let rows = conn
         .execute(
-            "UPDATE payments SET tipo = ?1, monto_cents = ?2, fecha = ?3, categoria_id = ?4, contacto_id = ?5, descripcion = ?6 WHERE id = ?7",
+            "UPDATE payments SET tipo = ?1, monto_cents = ?2, fecha = ?3, categoria_id = ?4, contacto_id = ?5, descripcion = ?6, recurrente = ?7, comprobante_path = ?8 WHERE id = ?9",
             params![
                 input.tipo,
                 cents,
@@ -138,6 +178,8 @@ pub fn update_payment(conn: &Connection, id: i64, input: &NewPayment) -> Result<
                 input.categoria_id,
                 input.contacto_id,
                 input.descripcion.trim(),
+                rec,
+                input.comprobante_path.trim(),
                 id
             ],
         )
@@ -837,6 +879,206 @@ pub fn verify_pin(conn: &Connection, pin: &str) -> Result<bool, String> {
         .is_ok())
 }
 
+// ── Recurrentes, presupuestos, resumen ────────────────────────────────────
+
+fn es_bisiesto(y: i32) -> bool {
+    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+}
+
+fn dias_mes(y: i32, m: i32) -> i32 {
+    match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if es_bisiesto(y) => 29,
+        2 => 28,
+        _ => 30,
+    }
+}
+
+fn parse_fecha(f: &str) -> Result<(i32, i32, i32), String> {
+    if f.len() != 10 {
+        return Err("fecha inválida".into());
+    }
+    let y: i32 = f[0..4].parse().map_err(|_| "fecha inválida")?;
+    let m: i32 = f[5..7].parse().map_err(|_| "fecha inválida")?;
+    let d: i32 = f[8..10].parse().map_err(|_| "fecha inválida")?;
+    if !(1..=12).contains(&m) || d < 1 || d > dias_mes(y, m) {
+        return Err("fecha inválida".into());
+    }
+    Ok((y, m, d))
+}
+
+fn fmt_fecha(y: i32, m: i32, d: i32) -> String {
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+fn sumar_dias(fecha: &str, n: i32) -> Result<String, String> {
+    let (mut y, mut m, mut d) = parse_fecha(fecha)?;
+    let mut rest = n;
+    while rest > 0 {
+        let cabe = dias_mes(y, m) - d;
+        if rest <= cabe {
+            d += rest;
+            rest = 0;
+        } else {
+            rest -= cabe + 1;
+            d = 1;
+            m += 1;
+            if m > 12 {
+                m = 1;
+                y += 1;
+            }
+        }
+    }
+    Ok(fmt_fecha(y, m, d))
+}
+
+fn siguiente_ocurrencia(rep: &str, desde: &str) -> Result<String, String> {
+    match rep {
+        "daily" => sumar_dias(desde, 1),
+        "weekly" => sumar_dias(desde, 7),
+        "monthly" => {
+            let (y, m, d) = parse_fecha(desde)?;
+            let (ny, nm) = if m == 12 { (y + 1, 1) } else { (y, m + 1) };
+            Ok(fmt_fecha(ny, nm, d.min(dias_mes(ny, nm))))
+        }
+        _ => Err("repetición inválida".into()),
+    }
+}
+
+/// Genera las ocurrencias pendientes de pagos recurrentes hasta `hoy`.
+/// Las copias llevan serie_id = plantilla y recurrente 'none'.
+pub fn generar_recurrentes(conn: &Connection, hoy: &str) -> Result<i64, String> {
+    if hoy.len() != 10 {
+        return Err("fecha inválida".into());
+    }
+    let empty: &[&dyn rusqlite::ToSql] = &[];
+    let mut stmt = conn
+        .prepare(&format!(
+            "{PAYMENT_SELECT} WHERE p.recurrente <> 'none' AND p.serie_id IS NULL"
+        ))
+        .map_err(|e| format!("prepare: {e}"))?;
+    let rows = stmt
+        .query_map(empty, row_to_payment)
+        .map_err(|e| format!("query: {e}"))?;
+    let mut plantillas = Vec::new();
+    for r in rows {
+        plantillas.push(r.map_err(|e| format!("row: {e}"))?);
+    }
+    let mut total = 0i64;
+    for t in plantillas {
+        let last: String = conn
+            .query_row(
+                "SELECT MAX(fecha) FROM payments WHERE id = ?1 OR serie_id = ?1",
+                params![t.id],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("max: {e}"))?;
+        let mut next = siguiente_ocurrencia(&t.recurrente, &last)?;
+        let mut guard = 0;
+        while next.as_str() <= hoy && guard < 365 {
+            conn.execute(
+                "INSERT INTO payments (tipo, monto_cents, fecha, categoria_id, contacto_id, descripcion, recurrente, comprobante_path, serie_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'none', ?7, ?8)",
+                params![
+                    t.tipo,
+                    t.monto_cents,
+                    next,
+                    t.categoria_id,
+                    t.contacto_id,
+                    t.descripcion,
+                    t.comprobante_path,
+                    t.id
+                ],
+            )
+            .map_err(|e| format!("insert serie: {e}"))?;
+            total += 1;
+            guard += 1;
+            let cur = next;
+            next = siguiente_ocurrencia(&t.recurrente, &cur)?;
+        }
+    }
+    Ok(total)
+}
+
+pub fn set_budget(conn: &Connection, categoria_id: i64, monto: f64) -> Result<(), String> {
+    let cents = to_cents(monto)?;
+    let existe: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM categories WHERE id = ?1",
+            params![categoria_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("categoria: {e}"))?;
+    if existe == 0 {
+        return Err("categoría no existe".into());
+    }
+    conn.execute(
+        "INSERT INTO budgets (categoria_id, monto_cents) VALUES (?1, ?2) ON CONFLICT(categoria_id) DO UPDATE SET monto_cents = excluded.monto_cents",
+        params![categoria_id, cents],
+    )
+    .map_err(|e| format!("upsert: {e}"))?;
+    Ok(())
+}
+
+pub fn delete_budget(conn: &Connection, id: i64) -> Result<(), String> {
+    let rows = conn
+        .execute("DELETE FROM budgets WHERE id = ?1", params![id])
+        .map_err(|e| format!("delete: {e}"))?;
+    if rows == 0 {
+        return Err("presupuesto no encontrado".into());
+    }
+    Ok(())
+}
+
+pub fn list_budgets(conn: &Connection, mes: &str) -> Result<Vec<BudgetView>, String> {
+    if mes.len() != 7 {
+        return Err("mes inválido (yyyy-MM)".into());
+    }
+    let mut stmt = conn
+        .prepare(
+            "SELECT b.id, b.categoria_id, c.nombre, c.color, b.monto_cents,
+                    COALESCE((SELECT SUM(p.monto_cents) FROM payments p WHERE p.categoria_id = c.id AND p.tipo = 'gasto' AND substr(p.fecha, 1, 7) = ?1), 0)
+             FROM budgets b JOIN categories c ON c.id = b.categoria_id ORDER BY c.nombre",
+        )
+        .map_err(|e| format!("prepare: {e}"))?;
+    let rows = stmt
+        .query_map(params![mes], |r| {
+            let monto: i64 = r.get(4)?;
+            let gast: i64 = r.get(5)?;
+            Ok(BudgetView {
+                id: r.get(0)?,
+                categoria_id: r.get(1)?,
+                categoria: r.get(2)?,
+                color: r.get(3)?,
+                monto_cents: monto,
+                gastado_cents: gast,
+                pct: if monto > 0 { gast * 100 / monto } else { 0 },
+            })
+        })
+        .map_err(|e| format!("query: {e}"))?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(|e| format!("row: {e}"))?);
+    }
+    Ok(out)
+}
+
+pub fn resumen_mensual(conn: &Connection, meses: Vec<String>) -> Result<Vec<MonthPoint>, String> {
+    if meses.len() > 24 {
+        return Err("demasiados meses".into());
+    }
+    let mut out = Vec::new();
+    for m in meses {
+        let s = month_summary(conn, &m)?;
+        out.push(MonthPoint {
+            mes: s.mes,
+            ingresos_cents: s.ingresos_cents,
+            gastos_cents: s.gastos_cents,
+        });
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -856,6 +1098,8 @@ mod tests {
             categoria_id: None,
             contacto_id: None,
             descripcion: "prueba".into(),
+            recurrente: "none".into(),
+            comprobante_path: "".into(),
         }
     }
 
@@ -1094,5 +1338,63 @@ mod tests {
             get_setting(&conn, "tema").unwrap().as_deref(),
             Some("claro")
         );
+    }
+
+    #[test]
+    fn fechas_calendario() {
+        assert_eq!(sumar_dias("2026-01-31", 1).unwrap(), "2026-02-01");
+        assert_eq!(sumar_dias("2026-12-30", 7).unwrap(), "2027-01-06");
+        assert_eq!(
+            siguiente_ocurrencia("monthly", "2026-01-31").unwrap(),
+            "2026-02-28"
+        );
+        assert_eq!(
+            siguiente_ocurrencia("monthly", "2024-01-31").unwrap(),
+            "2024-02-29"
+        );
+        assert_eq!(
+            siguiente_ocurrencia("weekly", "2026-09-10").unwrap(),
+            "2026-09-17"
+        );
+    }
+
+    #[test]
+    fn recurrentes_generan_serie() {
+        let conn = mem();
+        let mut t = sample("gasto", 10.0, "2026-09-01");
+        t.recurrente = "daily".into();
+        t.descripcion = "Suscripción".into();
+        let tpl = insert_payment(&conn, &t).unwrap();
+        assert!(tpl.es_plantilla());
+        let n = generar_recurrentes(&conn, "2026-09-03").unwrap();
+        assert_eq!(n, 2);
+        let f = PaymentFilter {
+            buscar: Some("Suscripción".into()),
+            limite: 100,
+            ..Default::default()
+        };
+        let items = query_payments(&conn, &f).unwrap();
+        assert_eq!(items.len(), 3);
+        assert!(items.iter().filter(|p| p.serie_id == Some(tpl.id)).count() == 2);
+        // Segunda pasada no duplica.
+        assert_eq!(generar_recurrentes(&conn, "2026-09-03").unwrap(), 0);
+    }
+
+    #[test]
+    fn presupuestos_gasto_mes() {
+        let conn = mem();
+        let cats = all_categories(&conn).unwrap();
+        let comida = cats.iter().find(|c| c.nombre == "Comida").unwrap().id;
+        set_budget(&conn, comida, 100.0).unwrap();
+        let mut g = sample("gasto", 30.0, "2026-09-05");
+        g.categoria_id = Some(comida);
+        insert_payment(&conn, &g).unwrap();
+        let list = list_budgets(&conn, "2026-09").unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].gastado_cents, 3000);
+        assert_eq!(list[0].pct, 30);
+        let pts = resumen_mensual(&conn, vec!["2026-09".to_string()]).unwrap();
+        assert_eq!(pts.len(), 1);
+        assert_eq!(pts[0].gastos_cents, 3000);
     }
 }

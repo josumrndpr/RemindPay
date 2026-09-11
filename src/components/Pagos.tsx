@@ -1,14 +1,29 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  abrirComprobante,
   createPayment,
   deletePayment,
+  guardarComprobante,
+  isPreview,
   listCategories,
   listContacts,
   listPayments,
   updatePayment,
 } from "../lib/api";
-import { fmtFecha, fmtUSD, monthLocal, todayLocal } from "../lib/format";
-import type { Category, Contact, Payment, PaymentType } from "../lib/types";
+import {
+  ahoraArchivo,
+  fmtFecha,
+  fmtUSD,
+  monthLocal,
+  todayLocal,
+} from "../lib/format";
+import type {
+  Category,
+  Contact,
+  Payment,
+  PaymentType,
+  Recurrence,
+} from "../lib/types";
 import Modal from "./Modal";
 import {
   Badge,
@@ -33,6 +48,8 @@ interface FormState {
   categoria_id: string;
   contacto_id: string;
   descripcion: string;
+  recurrente: Recurrence;
+  comprobante: string;
 }
 
 const EMPTY_FORM: FormState = {
@@ -42,7 +59,20 @@ const EMPTY_FORM: FormState = {
   categoria_id: "",
   contacto_id: "",
   descripcion: "",
+  recurrente: "none",
+  comprobante: "",
 };
+
+const REPETIR: { id: Recurrence; label: string }[] = [
+  { id: "none", label: "Una vez" },
+  { id: "daily", label: "Diaria" },
+  { id: "weekly", label: "Semanal" },
+  { id: "monthly", label: "Mensual" },
+];
+
+export function repetirCorto(r: Recurrence): string {
+  return REPETIR.find((x) => x.id === r)?.label ?? r;
+}
 
 export default function Pagos({ signalNuevo }: { signalNuevo: number }) {
   const [items, setItems] = useState<Payment[]>([]);
@@ -58,6 +88,7 @@ export default function Pagos({ signalNuevo }: { signalNuevo: number }) {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -113,6 +144,8 @@ export default function Pagos({ signalNuevo }: { signalNuevo: number }) {
       categoria_id: p.categoria_id?.toString() ?? "",
       contacto_id: p.contacto_id?.toString() ?? "",
       descripcion: p.descripcion,
+      recurrente: p.recurrente,
+      comprobante: p.comprobante_path,
     });
     setFormError(null);
     setModalOpen(true);
@@ -138,6 +171,8 @@ export default function Pagos({ signalNuevo }: { signalNuevo: number }) {
         categoria_id: form.categoria_id ? Number(form.categoria_id) : null,
         contacto_id: form.contacto_id ? Number(form.contacto_id) : null,
         descripcion: form.descripcion.trim(),
+        recurrente: form.recurrente,
+        comprobante_path: form.comprobante,
       };
       if (editing) await updatePayment(editing.id, input);
       else await createPayment(input);
@@ -160,6 +195,50 @@ export default function Pagos({ signalNuevo }: { signalNuevo: number }) {
     try {
       await deletePayment(p.id);
       await load();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function adjuntar() {
+    setFormError(null);
+    try {
+      if (isPreview()) {
+        fileRef.current?.click();
+        return;
+      }
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const ruta = await open({
+        multiple: false,
+        filters: [
+          { name: "Comprobante", extensions: ["png", "jpg", "jpeg", "webp", "pdf"] },
+        ],
+      });
+      if (typeof ruta === "string") {
+        const nombre = await guardarComprobante(ruta, ahoraArchivo());
+        setForm((f) => ({ ...f, comprobante: nombre }));
+      }
+    } catch (e) {
+      setFormError(String(e));
+    }
+  }
+
+  async function onFilePreview(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const { adjuntarPreview } = await import("../lib/mock");
+      const nombre = await adjuntarPreview(file);
+      setForm((f) => ({ ...f, comprobante: nombre }));
+    } catch (err) {
+      setFormError(String(err));
+    }
+  }
+
+  async function verComp(nombre: string) {
+    try {
+      await abrirComprobante(nombre);
     } catch (e) {
       setError(String(e));
     }
@@ -232,7 +311,7 @@ export default function Pagos({ signalNuevo }: { signalNuevo: number }) {
       )}
 
       <div className={`${tableWrapCls} mt-4`}>
-        <table className="w-full min-w-[680px] text-sm">
+        <table className="w-full min-w-[720px] text-sm">
           <thead className="sticky top-0 bg-zinc-900">
             <tr className="border-b border-zinc-800">
               <th className={thCls}>Fecha</th>
@@ -275,12 +354,31 @@ export default function Pagos({ signalNuevo }: { signalNuevo: number }) {
                   <td className="tnum whitespace-nowrap px-4 py-3 text-zinc-400">
                     {fmtFecha(p.fecha)}
                   </td>
-                  <td className="max-w-[260px] truncate px-4 py-3 font-medium">
-                    {p.descripcion || (
-                      <span className="font-normal text-zinc-600">
-                        Sin descripción
-                      </span>
-                    )}
+                  <td className="max-w-[240px] px-4 py-3">
+                    <p className="truncate font-medium">
+                      {p.descripcion || (
+                        <span className="font-normal text-zinc-600">
+                          Sin descripción
+                        </span>
+                      )}
+                    </p>
+                    <p className="mt-0.5 flex items-center gap-1.5 text-xs text-zinc-500">
+                      {p.recurrente !== "none" && p.serie_id == null && (
+                        <span className="inline-flex items-center gap-1 text-emerald-300">
+                          <Icon name="deudas" size={11} />
+                          {repetirCorto(p.recurrente)}
+                        </span>
+                      )}
+                      {p.comprobante_path && (
+                        <button
+                          onClick={() => void verComp(p.comprobante_path)}
+                          className="inline-flex items-center gap-1 hover:text-zinc-200"
+                        >
+                          <Icon name="download" size={11} />
+                          Comprobante
+                        </button>
+                      )}
+                    </p>
                   </td>
                   <td className="px-4 py-3 text-zinc-400">
                     {p.categoria ?? "—"}
@@ -403,6 +501,57 @@ export default function Pagos({ signalNuevo }: { signalNuevo: number }) {
                 </select>
               </Field>
             </div>
+            <div className="grid grid-cols-2 gap-2.5">
+              <Field label="Repetición">
+                <select
+                  value={form.recurrente}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      recurrente: e.target.value as Recurrence,
+                    }))
+                  }
+                  className={inputCls}
+                >
+                  {REPETIR.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Comprobante">
+                {form.comprobante ? (
+                  <div className="flex gap-1.5">
+                    <button
+                      onClick={() => void verComp(form.comprobante)}
+                      className={`${btnSecondary} min-w-0 flex-1 !px-2 text-xs`}
+                    >
+                      <span className="truncate">Ver archivo</span>
+                    </button>
+                    <button
+                      onClick={() => setForm((f) => ({ ...f, comprobante: "" }))}
+                      className="rounded-xl bg-zinc-800 px-2.5 text-zinc-400 hover:text-red-300"
+                      aria-label="Quitar comprobante"
+                    >
+                      <Icon name="x" size={14} />
+                    </button>
+                  </div>
+                ) : (
+                  <button onClick={() => void adjuntar()} className={btnSecondary}>
+                    <Icon name="download" size={15} />
+                    Adjuntar
+                  </button>
+                )}
+              </Field>
+            </div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".png,.jpg,.jpeg,.webp,.pdf"
+              className="hidden"
+              onChange={onFilePreview}
+            />
             <Field label="Descripción">
               <input
                 value={form.descripcion}

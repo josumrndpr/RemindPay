@@ -2,9 +2,9 @@
 
 use crate::db;
 use crate::models::{
-    BackupInfo, Category, Contact, Debt, DebtFilter, DebtPayment, DebtsSummary, EditDebt,
-    MonthSummary, NewContact, NewDebt, NewDebtPayment, NewPayment, NewReminder, Payment,
-    PaymentFilter, Reminder, ReminderFilter,
+    BackupInfo, BudgetView, Category, Contact, Debt, DebtFilter, DebtPayment, DebtsSummary,
+    EditDebt, MonthPoint, MonthSummary, NewContact, NewDebt, NewDebtPayment, NewPayment,
+    NewReminder, Payment, PaymentFilter, Reminder, ReminderFilter,
 };
 use rusqlite::Connection;
 use std::sync::Mutex;
@@ -402,4 +402,133 @@ pub fn create_backup(
 pub fn write_text_file(path: String, content: String) -> Result<(), String> {
     std::fs::write(&path, content).map_err(|e| format!("escribir: {e}"))?;
     Ok(())
+}
+
+// ── Comprobantes, recurrentes, presupuestos ──
+
+fn nombre_seguro(nombre: &str) -> String {
+    nombre
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .chars()
+        .take(60)
+        .collect()
+}
+
+/// Copia un comprobante (PNG/JPG/WEBP/PDF ≤10MB) a la carpeta de la app.
+/// Devuelve el nombre guardado (relativo).
+#[tauri::command]
+pub fn guardar_comprobante(
+    app: AppHandle,
+    origen: String,
+    stamp: String,
+) -> Result<String, String> {
+    if stamp.len() > 32
+        || !stamp
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        return Err("marca inválida".into());
+    }
+    let src = std::path::PathBuf::from(&origen);
+    if !src.is_file() {
+        return Err("archivo no válido".into());
+    }
+    let ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    if !["png", "jpg", "jpeg", "webp", "pdf"].contains(&ext.as_str()) {
+        return Err("solo PNG, JPG, WEBP o PDF".into());
+    }
+    let meta = std::fs::metadata(&src).map_err(|e| format!("leer: {e}"))?;
+    if meta.len() > 10 * 1024 * 1024 {
+        return Err("máximo 10 MB".into());
+    }
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app_data_dir: {e}"))?
+        .join("comprobantes");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("crear carpeta: {e}"))?;
+    let base = src
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "archivo".into());
+    let nombre = format!("{stamp}-{}.{}", nombre_seguro(&base), ext);
+    std::fs::copy(&src, dir.join(&nombre)).map_err(|e| format!("copiar: {e}"))?;
+    Ok(nombre)
+}
+
+/// Ruta absoluta de un comprobante guardado (para abrirlo).
+#[tauri::command]
+pub fn ruta_comprobante(app: AppHandle, nombre: String) -> Result<String, String> {
+    if nombre.len() > 120
+        || !nombre
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+    {
+        return Err("nombre inválido".into());
+    }
+    let ruta = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app_data_dir: {e}"))?
+        .join("comprobantes")
+        .join(&nombre);
+    if !ruta.is_file() {
+        return Err("comprobante no encontrado".into());
+    }
+    Ok(ruta.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub fn generar_recurrentes(
+    state: State<'_, Mutex<Connection>>,
+    hoy: String,
+) -> Result<i64, String> {
+    let conn = state.lock().map_err(|e| format!("db bloqueada: {e}"))?;
+    db::generar_recurrentes(&conn, &hoy)
+}
+
+#[tauri::command]
+pub fn list_budgets(
+    state: State<'_, Mutex<Connection>>,
+    mes: String,
+) -> Result<Vec<BudgetView>, String> {
+    let conn = state.lock().map_err(|e| format!("db bloqueada: {e}"))?;
+    db::list_budgets(&conn, &mes)
+}
+
+#[tauri::command]
+pub fn set_budget(
+    state: State<'_, Mutex<Connection>>,
+    categoria_id: i64,
+    monto: f64,
+) -> Result<(), String> {
+    let conn = state.lock().map_err(|e| format!("db bloqueada: {e}"))?;
+    db::set_budget(&conn, categoria_id, monto)
+}
+
+#[tauri::command]
+pub fn delete_budget(state: State<'_, Mutex<Connection>>, id: i64) -> Result<(), String> {
+    let conn = state.lock().map_err(|e| format!("db bloqueada: {e}"))?;
+    db::delete_budget(&conn, id)
+}
+
+#[tauri::command]
+pub fn resumen_mensual(
+    state: State<'_, Mutex<Connection>>,
+    meses: Vec<String>,
+) -> Result<Vec<MonthPoint>, String> {
+    let conn = state.lock().map_err(|e| format!("db bloqueada: {e}"))?;
+    db::resumen_mensual(&conn, meses)
 }

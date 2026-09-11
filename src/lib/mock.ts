@@ -4,12 +4,14 @@
 import { todayLocal } from "./format";
 import type {
   BackupInfo,
+  BudgetView,
   Category,
   Contact,
   Debt,
   DebtPayment,
   DebtsSummary,
   EditDebtInput,
+  MonthPoint,
   MonthSummary,
   NewContactInput,
   NewDebtInput,
@@ -136,14 +138,19 @@ function validarMonto(monto: number): number {
   return Math.round(monto * 100);
 }
 
-function validarPago(input: NewPaymentInput): number {
+function validarPago(input: NewPaymentInput): { cents: number; rec: string } {
   if (input.tipo !== "ingreso" && input.tipo !== "gasto")
     throw new Error("tipo inválido");
   const cents = validarMonto(input.monto);
   if (input.fecha.length !== 10) throw new Error("fecha inválida (yyyy-MM-dd)");
   if (input.descripcion.trim().length > 280)
     throw new Error("descripción muy larga (máx 280)");
-  return cents;
+  const rec = input.recurrente || "none";
+  if (!["none", "daily", "weekly", "monthly"].includes(rec))
+    throw new Error("repetición inválida");
+  if (input.comprobante_path.length > 120)
+    throw new Error("comprobante inválido");
+  return { cents, rec };
 }
 
 function catNombre(id: number | null): string | null {
@@ -182,7 +189,7 @@ export async function listPayments(f: {
 }
 
 export async function createPayment(input: NewPaymentInput): Promise<Payment> {
-  const cents = validarPago(input);
+  const { cents, rec } = validarPago(input);
   const p: Payment = {
     id: paySeq++,
     tipo: input.tipo,
@@ -192,8 +199,9 @@ export async function createPayment(input: NewPaymentInput): Promise<Payment> {
     categoria: catNombre(input.categoria_id),
     descripcion: input.descripcion.trim(),
     contacto_id: input.contacto_id,
-    comprobante_path: "",
-    recurrente: "none",
+    comprobante_path: input.comprobante_path,
+    recurrente: rec as Payment["recurrente"],
+    serie_id: null,
     created_at: new Date().toISOString(),
   };
   pays.push(p);
@@ -204,7 +212,7 @@ export async function updatePayment(
   id: number,
   input: NewPaymentInput,
 ): Promise<Payment> {
-  const cents = validarPago(input);
+  const { cents, rec } = validarPago(input);
   const p = pays.find((x) => x.id === id);
   if (!p) throw new Error("pago no encontrado");
   p.tipo = input.tipo;
@@ -214,6 +222,8 @@ export async function updatePayment(
   p.categoria = catNombre(input.categoria_id);
   p.contacto_id = input.contacto_id;
   p.descripcion = input.descripcion.trim();
+  p.recurrente = rec as Payment["recurrente"];
+  p.comprobante_path = input.comprobante_path;
   return p;
 }
 
@@ -647,4 +657,151 @@ export async function createBackup(stamp: string): Promise<BackupInfo> {
   mockBackups.push(b);
   while (mockBackups.length > 30) mockBackups.shift();
   return b;
+}
+
+// ── Recurrentes, presupuestos, resumen (vista previa) ──
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+function fmtDT(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function parseDT(f: string): Date {
+  const [y, m, d] = f.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function siguienteJS(rep: string, f: string): string {
+  const d = parseDT(f);
+  if (rep === "daily") {
+    d.setDate(d.getDate() + 1);
+  } else if (rep === "weekly") {
+    d.setDate(d.getDate() + 7);
+  } else if (rep === "monthly") {
+    const dia = d.getDate();
+    d.setMonth(d.getMonth() + 1);
+    if (d.getDate() !== dia) d.setDate(0);
+  }
+  return fmtDT(d);
+}
+
+export async function generarRecurrentes(hoy: string): Promise<number> {
+  let total = 0;
+  for (const t of pays.filter(
+    (p) => p.recurrente !== "none" && p.serie_id == null,
+  )) {
+    const serie = pays.filter((p) => p.id === t.id || p.serie_id === t.id);
+    const fechas = serie.map((p) => p.fecha).sort();
+    let last = fechas[fechas.length - 1] as string;
+    let guard = 0;
+    for (
+      let next = siguienteJS(t.recurrente, last);
+      next <= hoy && guard < 365;
+      last = next, next = siguienteJS(t.recurrente, last), guard++
+    ) {
+      pays.push({
+        id: paySeq++,
+        tipo: t.tipo,
+        monto_cents: t.monto_cents,
+        fecha: next,
+        categoria_id: t.categoria_id,
+        categoria: t.categoria,
+        descripcion: t.descripcion,
+        contacto_id: t.contacto_id,
+        comprobante_path: t.comprobante_path,
+        recurrente: "none",
+        serie_id: t.id,
+        created_at: new Date().toISOString(),
+      });
+      total++;
+    }
+  }
+  return total;
+}
+
+interface BudgetRow {
+  id: number;
+  categoria_id: number;
+  monto_cents: number;
+}
+
+let budgetSeq = 10;
+const budgets: BudgetRow[] = [];
+
+export async function listBudgets(mes: string): Promise<BudgetView[]> {
+  return budgets
+    .map((b) => {
+      const c = cats.find((x) => x.id === b.categoria_id);
+      if (!c) return null;
+      const gastado = pays
+        .filter(
+          (p) =>
+            p.categoria_id === c.id &&
+            p.tipo === "gasto" &&
+            p.fecha.slice(0, 7) === mes,
+        )
+        .reduce((a, p) => a + p.monto_cents, 0);
+      return {
+        id: b.id,
+        categoria_id: c.id,
+        categoria: c.nombre,
+        color: c.color,
+        monto_cents: b.monto_cents,
+        gastado_cents: gastado,
+        pct: b.monto_cents > 0 ? Math.floor((gastado * 100) / b.monto_cents) : 0,
+      } as BudgetView;
+    })
+    .filter((x): x is BudgetView => x !== null)
+    .sort((a, b) => a.categoria.localeCompare(b.categoria));
+}
+
+export async function setBudget(
+  categoriaId: number,
+  monto: number,
+): Promise<void> {
+  if (!cats.some((c) => c.id === categoriaId))
+    throw new Error("categoría no existe");
+  const cents = validarMonto(monto);
+  const b = budgets.find((x) => x.categoria_id === categoriaId);
+  if (b) b.monto_cents = cents;
+  else budgets.push({ id: budgetSeq++, categoria_id: categoriaId, monto_cents: cents });
+}
+
+export async function deleteBudget(id: number): Promise<void> {
+  const i = budgets.findIndex((x) => x.id === id);
+  if (i < 0) throw new Error("presupuesto no encontrado");
+  budgets.splice(i, 1);
+}
+
+export async function resumenMensual(meses: string[]): Promise<MonthPoint[]> {
+  return meses.map((mes) => {
+    const items = pays.filter((p) => p.fecha.slice(0, 7) === mes);
+    const ingresos = items
+      .filter((p) => p.tipo === "ingreso")
+      .reduce((a, p) => a + p.monto_cents, 0);
+    const gastos = items
+      .filter((p) => p.tipo === "gasto")
+      .reduce((a, p) => a + p.monto_cents, 0);
+    return { mes, ingresos_cents: ingresos, gastos_cents: gastos };
+  });
+}
+
+// ── Comprobantes (vista previa: blob en memoria) ──
+
+const compBlobs = new Map<string, string>();
+
+export async function adjuntarPreview(file: File): Promise<string> {
+  const limpio = file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_").slice(0, 50);
+  const nombre = `preview-${Date.now()}-${limpio}`;
+  compBlobs.set(nombre, URL.createObjectURL(file));
+  return nombre;
+}
+
+export async function abrirComprobantePreview(nombre: string): Promise<void> {
+  const url = compBlobs.get(nombre);
+  if (!url) throw new Error("comprobante no encontrado");
+  window.open(url, "_blank");
 }

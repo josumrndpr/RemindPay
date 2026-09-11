@@ -12,6 +12,7 @@ import { Icon, Logo } from "./components/ui";
 import {
   createBackup,
   dueReminders,
+  generarRecurrentes,
   getSetting,
   isPinSet,
   isPreview,
@@ -91,6 +92,7 @@ export default function App() {
   const [bridge, setBridge] = useState<string | null>(null);
   const [bridgeMs, setBridgeMs] = useState<number | null>(null);
   const [dueItems, setDueItems] = useState<Reminder[]>([]);
+  const [toast, setToast] = useState<string | null>(null);
   const notifiedRef = useRef<Set<number>>(new Set());
   const backupRef = useRef(false);
 
@@ -151,6 +153,24 @@ export default function App() {
         }
       } catch {
         /* respaldo silencioso */
+      }
+    })();
+  }, [lock]);
+
+  // Genera ocurrencias de pagos recurrentes (una vez por sesión).
+  useEffect(() => {
+    if (lock !== "ok") return;
+    void (async () => {
+      try {
+        const n = await generarRecurrentes(todayLocal());
+        if (n > 0) {
+          setToast(
+            `Se generaron ${n} pago(s) recurrentes automáticamente`,
+          );
+          setTimeout(() => setToast(null), 6000);
+        }
+      } catch {
+        /* silencioso */
       }
     })();
   }, [lock]);
@@ -362,6 +382,13 @@ export default function App() {
         </div>
       </main>
       </div>
+
+      {toast && (
+        <div className="anim-rise fixed bottom-4 left-4 z-40 flex max-w-sm items-center gap-2.5 rounded-2xl border border-emerald-800 bg-zinc-900 px-4 py-3 text-sm shadow-2xl">
+          <Icon name="check" size={16} className="shrink-0 text-emerald-300" />
+          <span>{toast}</span>
+        </div>
+      )}
 
       <DuePanel
         items={dueItems}

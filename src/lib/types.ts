@@ -37,6 +37,7 @@ export interface Payment {
   contacto_id: number | null;
   comprobante_path: string;
   recurrente: Recurrence;
+  serie_id?: number | null;
   created_at: string;
 }
 
@@ -48,6 +49,8 @@ export interface NewPaymentInput {
   categoria_id: number | null;
   contacto_id: number | null;
   descripcion: string;
+  recurrente: Recurrence;
+  comprobante_path: string;
 }
 
 export interface MonthSummary {
@@ -116,6 +119,22 @@ export interface BackupInfo {
   nombre: string;
   bytes: number;
   creado_secs: number;
+}
+
+export interface BudgetView {
+  id: number;
+  categoria_id: number;
+  categoria: string;
+  color: string;
+  monto_cents: number;
+  gastado_cents: number;
+  pct: number;
+}
+
+export interface MonthPoint {
+  mes: string;
+  ingresos_cents: number;
+  gastos_cents: number;
 }
 
 export interface Reminder {

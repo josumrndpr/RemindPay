@@ -5,12 +5,14 @@ import { todayLocal } from "./format";
 import * as mock from "./mock";
 import type {
   BackupInfo,
+  BudgetView,
   Category,
   Contact,
   Debt,
   DebtPayment,
   DebtsSummary,
   EditDebtInput,
+  MonthPoint,
   MonthSummary,
   NewContactInput,
   NewDebtInput,
@@ -261,4 +263,53 @@ export function createBackup(stamp: string): Promise<BackupInfo> {
 /** Solo app instalada (en vista previa export.ts descarga directo). */
 export function writeTextFile(path: string, content: string): Promise<void> {
   return invoke<void>("write_text_file", { path, content });
+}
+
+// ── Comprobantes, recurrentes, presupuestos ──
+
+export function guardarComprobante(
+  origen: string,
+  stamp: string,
+): Promise<string> {
+  if (isPreview())
+    return Promise.reject(new Error("solo en la app instalada"));
+  return invoke<string>("guardar_comprobante", { origen, stamp });
+}
+
+export function rutaComprobante(nombre: string): Promise<string> {
+  return invoke<string>("ruta_comprobante", { nombre });
+}
+
+export async function abrirComprobante(nombre: string): Promise<void> {
+  if (isPreview()) return mock.abrirComprobantePreview(nombre);
+  const { openPath } = await import("@tauri-apps/plugin-opener");
+  await openPath(await rutaComprobante(nombre));
+}
+
+export function generarRecurrentes(hoy: string): Promise<number> {
+  if (isPreview()) return mock.generarRecurrentes(hoy);
+  return invoke<number>("generar_recurrentes", { hoy });
+}
+
+export function listBudgets(mes: string): Promise<BudgetView[]> {
+  if (isPreview()) return mock.listBudgets(mes);
+  return invoke<BudgetView[]>("list_budgets", { mes });
+}
+
+export function setBudget(
+  categoriaId: number,
+  monto: number,
+): Promise<void> {
+  if (isPreview()) return mock.setBudget(categoriaId, monto);
+  return invoke<void>("set_budget", { categoria_id: categoriaId, monto });
+}
+
+export function deleteBudget(id: number): Promise<void> {
+  if (isPreview()) return mock.deleteBudget(id);
+  return invoke<void>("delete_budget", { id });
+}
+
+export function resumenMensual(meses: string[]): Promise<MonthPoint[]> {
+  if (isPreview()) return mock.resumenMensual(meses);
+  return invoke<MonthPoint[]>("resumen_mensual", { meses });
 }

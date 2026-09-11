@@ -122,6 +122,13 @@ pub fn run() {
             commands::list_backups,
             commands::create_backup,
             commands::write_text_file,
+            commands::guardar_comprobante,
+            commands::ruta_comprobante,
+            commands::generar_recurrentes,
+            commands::list_budgets,
+            commands::set_budget,
+            commands::delete_budget,
+            commands::resumen_mensual,
         ])
         .run(tauri::generate_context!())
         .expect("error while running RemindPay");
