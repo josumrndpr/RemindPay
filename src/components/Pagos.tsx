@@ -8,6 +8,7 @@ import {
   listCategories,
   listContacts,
   listPayments,
+  marcarPago,
   updatePayment,
 } from "../lib/api";
 import {
@@ -41,6 +42,8 @@ import {
   thCls,
 } from "./ui";
 
+type Estado = "pagado" | "pendiente";
+
 interface FormState {
   tipo: PaymentType;
   monto: string;
@@ -50,6 +53,7 @@ interface FormState {
   descripcion: string;
   recurrente: Recurrence;
   comprobante: string;
+  estado: Estado;
 }
 
 const EMPTY_FORM: FormState = {
@@ -61,6 +65,7 @@ const EMPTY_FORM: FormState = {
   descripcion: "",
   recurrente: "none",
   comprobante: "",
+  estado: "pagado",
 };
 
 const REPETIR: { id: Recurrence; label: string }[] = [
@@ -74,13 +79,19 @@ export function repetirCorto(r: Recurrence): string {
   return REPETIR.find((x) => x.id === r)?.label ?? r;
 }
 
+function estadoPorFecha(fecha: string): Estado {
+  return fecha > todayLocal() ? "pendiente" : "pagado";
+}
+
 export default function Pagos({ signalNuevo }: { signalNuevo: number }) {
   const [items, setItems] = useState<Payment[]>([]);
   const [cats, setCats] = useState<Category[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [buscar, setBuscar] = useState("");
   const [tipo, setTipo] = useState<"" | PaymentType>("");
+  const [estadoFiltro, setEstadoFiltro] = useState<"" | Estado>("");
   const [mes, setMes] = useState(monthLocal());
+  const [pendTotal, setPendTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -89,29 +100,41 @@ export default function Pagos({ signalNuevo }: { signalNuevo: number }) {
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const estadoTouched = useRef(false);
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [p, c, ct] = await Promise.all([
+      const filtros = {
+        tipo: tipo || undefined,
+        mes: mes || undefined,
+        buscar: buscar || undefined,
+      };
+      const [p, c, ct, pend] = await Promise.all([
         listPayments({
-          tipo: tipo || undefined,
-          mes: mes || undefined,
-          buscar: buscar || undefined,
+          ...filtros,
+          estado: estadoFiltro || undefined,
           limite: 500,
         }),
         listCategories(),
         listContacts(),
+        listPayments({ ...filtros, estado: "pendiente", limite: 2000 }),
       ]);
       setItems(p);
       setCats(c);
       setContacts(ct);
+      setPendTotal(
+        pend.reduce(
+          (a, x) => a + (x.tipo === "gasto" ? x.monto_cents : -x.monto_cents),
+          0,
+        ),
+      );
     } catch (e) {
       setError(String(e));
     } finally {
       setLoading(false);
     }
-  }, [buscar, tipo, mes]);
+  }, [buscar, tipo, estadoFiltro, mes]);
 
   useEffect(() => {
     setLoading(true);
@@ -121,7 +144,9 @@ export default function Pagos({ signalNuevo }: { signalNuevo: number }) {
 
   function openNuevo() {
     setEditing(null);
-    setForm({ ...EMPTY_FORM, fecha: todayLocal() });
+    const fecha = todayLocal();
+    setForm({ ...EMPTY_FORM, fecha, estado: estadoPorFecha(fecha) });
+    estadoTouched.current = false;
     setFormError(null);
     setModalOpen(true);
   }
@@ -146,9 +171,19 @@ export default function Pagos({ signalNuevo }: { signalNuevo: number }) {
       descripcion: p.descripcion,
       recurrente: p.recurrente,
       comprobante: p.comprobante_path,
+      estado: p.estado,
     });
+    estadoTouched.current = true;
     setFormError(null);
     setModalOpen(true);
+  }
+
+  function onFecha(fecha: string) {
+    setForm((f) => ({
+      ...f,
+      fecha,
+      estado: estadoTouched.current ? f.estado : estadoPorFecha(fecha),
+    }));
   }
 
   async function guardar() {
@@ -173,6 +208,7 @@ export default function Pagos({ signalNuevo }: { signalNuevo: number }) {
         descripcion: form.descripcion.trim(),
         recurrente: form.recurrente,
         comprobante_path: form.comprobante,
+        estado: form.estado,
       };
       if (editing) await updatePayment(editing.id, input);
       else await createPayment(input);
@@ -182,6 +218,15 @@ export default function Pagos({ signalNuevo }: { signalNuevo: number }) {
       setFormError(String(e));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function toggleEstado(p: Payment) {
+    try {
+      await marcarPago(p.id, p.estado === "pagado" ? "pendiente" : "pagado");
+      await load();
+    } catch (e) {
+      setError(String(e));
     }
   }
 
@@ -259,6 +304,7 @@ export default function Pagos({ signalNuevo }: { signalNuevo: number }) {
           <h2 className="text-[26px] font-bold tracking-tight">Pagos</h2>
           <p className="tnum mt-0.5 text-sm text-zinc-500">
             {items.length} movimientos · Neto {fmtUSD(neto)}
+            {pendTotal !== 0 && ` · ${fmtUSD(pendTotal)} pendientes`}
           </p>
         </div>
         <button onClick={openNuevo} className={btnPrimary}>
@@ -295,6 +341,16 @@ export default function Pagos({ signalNuevo }: { signalNuevo: number }) {
           <option value="ingreso">Ingresos</option>
           <option value="gasto">Gastos</option>
         </select>
+        <select
+          value={estadoFiltro}
+          onChange={(e) => setEstadoFiltro(e.target.value as "" | Estado)}
+          aria-label="Estado"
+          className={`${inputCls} w-auto`}
+        >
+          <option value="">Pagados + pendientes</option>
+          <option value="pagado">Pagados</option>
+          <option value="pendiente">Pendientes</option>
+        </select>
         <input
           type="month"
           value={mes}
@@ -311,7 +367,7 @@ export default function Pagos({ signalNuevo }: { signalNuevo: number }) {
       )}
 
       <div className={`${tableWrapCls} mt-4`}>
-        <table className="w-full min-w-[720px] text-sm">
+        <table className="w-full min-w-[760px] text-sm">
           <thead className="sticky top-0 bg-zinc-900">
             <tr className="border-b border-zinc-800">
               <th className={thCls}>Fecha</th>
@@ -349,7 +405,9 @@ export default function Pagos({ signalNuevo }: { signalNuevo: number }) {
               items.map((p) => (
                 <tr
                   key={p.id}
-                  className="anim-fade border-b border-zinc-800/60 last:border-0 transition-colors hover:bg-zinc-900/70"
+                  className={`anim-fade border-b border-zinc-800/60 last:border-0 transition-colors hover:bg-zinc-900/70 ${
+                    p.estado === "pendiente" ? "opacity-85" : ""
+                  }`}
                 >
                   <td className="tnum whitespace-nowrap px-4 py-3 text-zinc-400">
                     {fmtFecha(p.fecha)}
@@ -384,9 +442,14 @@ export default function Pagos({ signalNuevo }: { signalNuevo: number }) {
                     {p.categoria ?? "—"}
                   </td>
                   <td className="px-4 py-3">
-                    <Badge tone={p.tipo === "ingreso" ? "green" : "zinc"}>
-                      {p.tipo === "ingreso" ? "Ingreso" : "Gasto"}
-                    </Badge>
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      <Badge tone={p.tipo === "ingreso" ? "green" : "zinc"}>
+                        {p.tipo === "ingreso" ? "Ingreso" : "Gasto"}
+                      </Badge>
+                      {p.estado === "pendiente" && (
+                        <Badge tone="amber">Pendiente</Badge>
+                      )}
+                    </span>
                   </td>
                   <td
                     className={`tnum whitespace-nowrap px-4 py-3 text-right font-semibold ${
@@ -399,6 +462,12 @@ export default function Pagos({ signalNuevo }: { signalNuevo: number }) {
                     {fmtUSD(p.monto_cents)}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-right">
+                    <button
+                      onClick={() => void toggleEstado(p)}
+                      className={`${btnGhostSm} mr-3`}
+                    >
+                      {p.estado === "pagado" ? "Poner pendiente" : "Marcar pagado"}
+                    </button>
                     <button
                       onClick={() => openEditar(p)}
                       className={`${btnGhostSm} mr-3`}
@@ -444,6 +513,26 @@ export default function Pagos({ signalNuevo }: { signalNuevo: number }) {
                 </button>
               ))}
             </div>
+            <div className="grid grid-cols-2 gap-2 rounded-xl bg-zinc-800/60 p-1">
+              {(["pagado", "pendiente"] as Estado[]).map((v) => (
+                <button
+                  key={v}
+                  onClick={() => {
+                    estadoTouched.current = true;
+                    setForm((f) => ({ ...f, estado: v }));
+                  }}
+                  className={`rounded-lg px-3 py-2 text-sm font-semibold capitalize transition-all ${
+                    form.estado === v
+                      ? v === "pagado"
+                        ? "bg-emerald-500 text-zinc-950 shadow"
+                        : "bg-amber-500 text-zinc-950 shadow"
+                      : "text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  {v}
+                </button>
+              ))}
+            </div>
             <div className="grid grid-cols-2 gap-2.5">
               <Field label="Monto (USD)">
                 <input
@@ -460,9 +549,7 @@ export default function Pagos({ signalNuevo }: { signalNuevo: number }) {
                 <input
                   type="date"
                   value={form.fecha}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, fecha: e.target.value }))
-                  }
+                  onChange={(e) => onFecha(e.target.value)}
                   className={inputCls}
                 />
               </Field>

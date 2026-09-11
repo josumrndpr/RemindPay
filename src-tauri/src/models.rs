@@ -15,6 +15,7 @@ pub struct Payment {
     pub comprobante_path: String,
     pub recurrente: String,
     pub serie_id: Option<i64>,
+    pub estado: String,
     pub created_at: String,
 }
 
@@ -35,6 +36,7 @@ pub struct NewPayment {
     pub descripcion: String,
     pub recurrente: String,
     pub comprobante_path: String,
+    pub estado: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -59,6 +61,7 @@ pub struct PaymentFilter {
     pub tipo: Option<String>,
     pub mes: Option<String>,
     pub buscar: Option<String>,
+    pub estado: Option<String>,
     pub limite: i64,
 }
 

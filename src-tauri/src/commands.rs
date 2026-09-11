@@ -19,6 +19,7 @@ pub fn list_payments(
     tipo: Option<String>,
     mes: Option<String>,
     buscar: Option<String>,
+    estado: Option<String>,
     limite: Option<i64>,
 ) -> Result<Vec<Payment>, String> {
     let conn = state.lock().map_err(|e| format!("db bloqueada: {e}"))?;
@@ -28,6 +29,7 @@ pub fn list_payments(
             tipo,
             mes,
             buscar,
+            estado,
             limite: limite.unwrap_or(200),
         },
     )
@@ -56,6 +58,16 @@ pub fn update_payment(
 pub fn delete_payment(state: State<'_, Mutex<Connection>>, id: i64) -> Result<(), String> {
     let conn = state.lock().map_err(|e| format!("db bloqueada: {e}"))?;
     db::delete_payment(&conn, id)
+}
+
+#[tauri::command]
+pub fn marcar_pago(
+    state: State<'_, Mutex<Connection>>,
+    id: i64,
+    estado: String,
+) -> Result<Payment, String> {
+    let conn = state.lock().map_err(|e| format!("db bloqueada: {e}"))?;
+    db::marcar_pago(&conn, id, &estado)
 }
 
 #[tauri::command]

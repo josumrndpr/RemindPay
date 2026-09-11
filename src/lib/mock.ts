@@ -50,6 +50,7 @@ const pays: Payment[] = [
     contacto_id: null,
     comprobante_path: "",
     recurrente: "none",
+    estado: "pagado",
     created_at: `${MES}-05T10:00:00`,
   },
   {
@@ -63,6 +64,7 @@ const pays: Payment[] = [
     contacto_id: null,
     comprobante_path: "",
     recurrente: "none",
+    estado: "pagado",
     created_at: `${MES}-06T12:00:00`,
   },
   {
@@ -76,6 +78,7 @@ const pays: Payment[] = [
     contacto_id: null,
     comprobante_path: "",
     recurrente: "none",
+    estado: "pagado",
     created_at: `${MES}-07T09:00:00`,
   },
 ];
@@ -169,6 +172,7 @@ export async function listPayments(f: {
   tipo?: string;
   mes?: string;
   buscar?: string;
+  estado?: string;
   limite?: number;
 }): Promise<Payment[]> {
   let out = [...pays].sort((a, b) =>
@@ -176,6 +180,8 @@ export async function listPayments(f: {
   );
   if (f.tipo === "ingreso" || f.tipo === "gasto")
     out = out.filter((p) => p.tipo === f.tipo);
+  if (f.estado === "pagado" || f.estado === "pendiente")
+    out = out.filter((p) => p.estado === f.estado);
   if (f.mes && f.mes.length === 7)
     out = out.filter((p) => p.fecha.slice(0, 7) === f.mes);
   const q = (f.buscar ?? "").trim().toLowerCase();
@@ -202,6 +208,7 @@ export async function createPayment(input: NewPaymentInput): Promise<Payment> {
     comprobante_path: input.comprobante_path,
     recurrente: rec as Payment["recurrente"],
     serie_id: null,
+    estado: input.estado,
     created_at: new Date().toISOString(),
   };
   pays.push(p);
@@ -224,6 +231,7 @@ export async function updatePayment(
   p.descripcion = input.descripcion.trim();
   p.recurrente = rec as Payment["recurrente"];
   p.comprobante_path = input.comprobante_path;
+  p.estado = input.estado;
   return p;
 }
 
@@ -233,8 +241,19 @@ export async function deletePayment(id: number): Promise<void> {
   pays.splice(i, 1);
 }
 
+export async function marcarPago(id: number, estado: string): Promise<Payment> {
+  if (estado !== "pagado" && estado !== "pendiente")
+    throw new Error("estado inválido");
+  const p = pays.find((x) => x.id === id);
+  if (!p) throw new Error("pago no encontrado");
+  p.estado = estado as Payment["estado"];
+  return p;
+}
+
 export async function paymentsSummary(mes: string): Promise<MonthSummary> {
-  const items = pays.filter((p) => p.fecha.slice(0, 7) === mes);
+  const items = pays.filter(
+    (p) => p.fecha.slice(0, 7) === mes && p.estado === "pagado",
+  );
   const ingresos = items
     .filter((p) => p.tipo === "ingreso")
     .reduce((a, p) => a + p.monto_cents, 0);
@@ -714,6 +733,7 @@ export async function generarRecurrentes(hoy: string): Promise<number> {
         comprobante_path: t.comprobante_path,
         recurrente: "none",
         serie_id: t.id,
+        estado: "pendiente",
         created_at: new Date().toISOString(),
       });
       total++;
@@ -741,6 +761,7 @@ export async function listBudgets(mes: string): Promise<BudgetView[]> {
           (p) =>
             p.categoria_id === c.id &&
             p.tipo === "gasto" &&
+            p.estado === "pagado" &&
             p.fecha.slice(0, 7) === mes,
         )
         .reduce((a, p) => a + p.monto_cents, 0);
@@ -778,7 +799,9 @@ export async function deleteBudget(id: number): Promise<void> {
 
 export async function resumenMensual(meses: string[]): Promise<MonthPoint[]> {
   return meses.map((mes) => {
-    const items = pays.filter((p) => p.fecha.slice(0, 7) === mes);
+    const items = pays.filter(
+      (p) => p.fecha.slice(0, 7) === mes && p.estado === "pagado",
+    );
     const ingresos = items
       .filter((p) => p.tipo === "ingreso")
       .reduce((a, p) => a + p.monto_cents, 0);

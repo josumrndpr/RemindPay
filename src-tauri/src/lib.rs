@@ -92,6 +92,7 @@ pub fn run() {
             commands::create_payment,
             commands::update_payment,
             commands::delete_payment,
+            commands::marcar_pago,
             commands::payments_summary,
             commands::list_categories,
             commands::list_debts,

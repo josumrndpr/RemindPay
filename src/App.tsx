@@ -6,6 +6,7 @@ import Deudas from "./components/Deudas";
 import DuePanel from "./components/DuePanel";
 import Pagos from "./components/Pagos";
 import PinGate from "./components/PinGate";
+import Planificador from "./components/Planificador";
 import Recordatorios from "./components/Recordatorios";
 import Titlebar from "./components/Titlebar";
 import { Icon, Logo } from "./components/ui";
@@ -31,10 +32,11 @@ import { completarRecordatorio } from "./lib/recordatorios";
 import { beep } from "./lib/sound";
 import type { Reminder, Section } from "./lib/types";
 
-const NAV_MAIN: { id: Section; label: string; icon: "dashboard" | "pagos" | "deudas" | "bell"; atajo: string }[] = [
+const NAV_MAIN: { id: Section; label: string; icon: "dashboard" | "pagos" | "deudas" | "calendar" | "bell"; atajo: string }[] = [
   { id: "dashboard", label: "Dashboard", icon: "dashboard", atajo: "" },
   { id: "pagos", label: "Pagos", icon: "pagos", atajo: "N" },
   { id: "deudas", label: "Deudas", icon: "deudas", atajo: "D" },
+  { id: "planificador", label: "Planificador", icon: "calendar", atajo: "L" },
   { id: "recordatorios", label: "Recordatorios", icon: "bell", atajo: "R" },
 ];
 
@@ -53,7 +55,7 @@ function NavButton({
   onClick,
 }: {
   active: boolean;
-  icon: "dashboard" | "pagos" | "deudas" | "bell" | "users" | "sliders";
+  icon: "dashboard" | "pagos" | "deudas" | "calendar" | "bell" | "users" | "sliders";
   label: string;
   atajo?: string;
   onClick: () => void;
@@ -194,6 +196,7 @@ export default function App() {
       const k = e.key.toLowerCase();
       if (k === "n") nuevoPago();
       else if (k === "d") nuevaDeuda();
+      else if (k === "l") setSection("planificador");
       else if (k === "r") nuevoRecordatorio();
     };
     window.addEventListener("keydown", h);
@@ -371,6 +374,7 @@ export default function App() {
           {section === "dashboard" && <Dashboard onNuevoPago={nuevoPago} />}
           {section === "pagos" && <Pagos signalNuevo={signalNuevo} />}
           {section === "deudas" && <Deudas signalNueva={signalDeuda} />}
+        {section === "planificador" && <Planificador />}
           {section === "recordatorios" && (
             <Recordatorios
               signalNuevo={signalRec}

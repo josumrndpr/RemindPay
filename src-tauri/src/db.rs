@@ -30,6 +30,22 @@ const SEED_CATEGORIES: &[(&str, &str, &str)] = &[
     ("Otros gastos", "#6b7280", "gasto"),
 ];
 
+fn tiene_columna(conn: &Connection, tabla: &str, col: &str) -> Result<bool, String> {
+    let empty: &[&dyn rusqlite::ToSql] = &[];
+    let mut stmt = conn
+        .prepare(&format!("PRAGMA table_info({tabla})"))
+        .map_err(|e| format!("migrar: {e}"))?;
+    let cols = stmt
+        .query_map(empty, |r| r.get::<_, String>(1))
+        .map_err(|e| format!("migrar: {e}"))?;
+    for c in cols {
+        if c.map_err(|e| format!("migrar: {e}"))? == col {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// Crea tablas + categorías iniciales. Idempotente por nombre:
 /// agrega las que falten (ej. Suscripción en DBs creadas antes).
 pub fn init(conn: &Connection) -> Result<(), String> {
@@ -45,31 +61,29 @@ pub fn init(conn: &Connection) -> Result<(), String> {
         .map_err(|e| format!("seed: {e}"))?;
     }
     // Migración v2: serie de recurrentes (DBs creadas antes de esta versión).
+    let sin_args: &[&dyn rusqlite::ToSql] = &[];
     let version: i64 = conn
-        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .query_row("PRAGMA user_version", sin_args, |r| r.get(0))
         .map_err(|e| format!("version: {e}"))?;
     if version < 2 {
-        let mut tiene = false;
-        {
-            let empty: &[&dyn rusqlite::ToSql] = &[];
-            let mut stmt = conn
-                .prepare("PRAGMA table_info(payments)")
-                .map_err(|e| format!("migrar: {e}"))?;
-            let cols = stmt
-                .query_map(empty, |r| r.get::<_, String>(1))
-                .map_err(|e| format!("migrar: {e}"))?;
-            for c in cols {
-                if c.map_err(|e| format!("migrar: {e}"))? == "serie_id" {
-                    tiene = true;
-                    break;
-                }
-            }
-        }
-        if !tiene {
+        if !tiene_columna(conn, "payments", "serie_id")? {
             conn.execute_batch("ALTER TABLE payments ADD COLUMN serie_id INTEGER")
                 .map_err(|e| format!("migrar serie_id: {e}"))?;
         }
         conn.execute_batch("PRAGMA user_version = 2")
+            .map_err(|e| format!("version: {e}"))?;
+    }
+    // Migración v3: pagado vs pendiente (los futuros pasan a pendientes).
+    if version < 3 {
+        if !tiene_columna(conn, "payments", "estado")? {
+            conn.execute_batch(
+                "ALTER TABLE payments ADD COLUMN estado TEXT NOT NULL DEFAULT 'pagado'",
+            )
+            .map_err(|e| format!("migrar estado: {e}"))?;
+        }
+        conn.execute_batch("UPDATE payments SET estado = 'pendiente' WHERE fecha > date('now')")
+            .map_err(|e| format!("migrar estado: {e}"))?;
+        conn.execute_batch("PRAGMA user_version = 3")
             .map_err(|e| format!("version: {e}"))?;
     }
     Ok(())
@@ -96,8 +110,8 @@ fn fecha_valida(fecha: &str) -> bool {
 
 // ── Pagos ────────────────────────────────────────────────────────────────
 
-/// Valida un pago y devuelve (centavos, recurrencia normalizada).
-pub fn validate(input: &NewPayment) -> Result<(i64, String), String> {
+/// Valida un pago y devuelve (centavos, recurrencia, estado).
+pub fn validate(input: &NewPayment) -> Result<(i64, String, String), String> {
     if input.tipo != "ingreso" && input.tipo != "gasto" {
         return Err("tipo inválido".into());
     }
@@ -116,7 +130,11 @@ pub fn validate(input: &NewPayment) -> Result<(i64, String), String> {
     if input.comprobante_path.len() > 120 {
         return Err("comprobante inválido".into());
     }
-    Ok((cents, rec))
+    let estado = match input.estado.as_str() {
+        "pagado" | "pendiente" => input.estado.clone(),
+        _ => return Err("estado inválido".into()),
+    };
+    Ok((cents, rec, estado))
 }
 
 fn row_to_payment(row: &Row) -> rusqlite::Result<Payment> {
@@ -132,11 +150,12 @@ fn row_to_payment(row: &Row) -> rusqlite::Result<Payment> {
         comprobante_path: row.get(8)?,
         recurrente: row.get(9)?,
         serie_id: row.get(11)?,
+        estado: row.get(12)?,
         created_at: row.get(10)?,
     })
 }
 
-const PAYMENT_SELECT: &str = "SELECT p.id, p.tipo, p.monto_cents, p.fecha, p.categoria_id, c.nombre, p.descripcion, p.contacto_id, p.comprobante_path, p.recurrente, p.created_at, p.serie_id FROM payments p LEFT JOIN categories c ON c.id = p.categoria_id";
+const PAYMENT_SELECT: &str = "SELECT p.id, p.tipo, p.monto_cents, p.fecha, p.categoria_id, c.nombre, p.descripcion, p.contacto_id, p.comprobante_path, p.recurrente, p.created_at, p.serie_id, p.estado FROM payments p LEFT JOIN categories c ON c.id = p.categoria_id";
 
 pub fn get_payment(conn: &Connection, id: i64) -> Result<Payment, String> {
     conn.query_row(
@@ -148,9 +167,9 @@ pub fn get_payment(conn: &Connection, id: i64) -> Result<Payment, String> {
 }
 
 pub fn insert_payment(conn: &Connection, input: &NewPayment) -> Result<Payment, String> {
-    let (cents, rec) = validate(input)?;
+    let (cents, rec, estado) = validate(input)?;
     conn.execute(
-        "INSERT INTO payments (tipo, monto_cents, fecha, categoria_id, contacto_id, descripcion, recurrente, comprobante_path) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO payments (tipo, monto_cents, fecha, categoria_id, contacto_id, descripcion, recurrente, comprobante_path, estado) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             input.tipo,
             cents,
@@ -159,7 +178,8 @@ pub fn insert_payment(conn: &Connection, input: &NewPayment) -> Result<Payment, 
             input.contacto_id,
             input.descripcion.trim(),
             rec,
-            input.comprobante_path.trim()
+            input.comprobante_path.trim(),
+            estado
         ],
     )
     .map_err(|e| format!("insert: {e}"))?;
@@ -167,10 +187,10 @@ pub fn insert_payment(conn: &Connection, input: &NewPayment) -> Result<Payment, 
 }
 
 pub fn update_payment(conn: &Connection, id: i64, input: &NewPayment) -> Result<Payment, String> {
-    let (cents, rec) = validate(input)?;
+    let (cents, rec, estado) = validate(input)?;
     let rows = conn
         .execute(
-            "UPDATE payments SET tipo = ?1, monto_cents = ?2, fecha = ?3, categoria_id = ?4, contacto_id = ?5, descripcion = ?6, recurrente = ?7, comprobante_path = ?8 WHERE id = ?9",
+            "UPDATE payments SET tipo = ?1, monto_cents = ?2, fecha = ?3, categoria_id = ?4, contacto_id = ?5, descripcion = ?6, recurrente = ?7, comprobante_path = ?8, estado = ?9 WHERE id = ?10",
             params![
                 input.tipo,
                 cents,
@@ -180,8 +200,26 @@ pub fn update_payment(conn: &Connection, id: i64, input: &NewPayment) -> Result<
                 input.descripcion.trim(),
                 rec,
                 input.comprobante_path.trim(),
+                estado,
                 id
             ],
+        )
+        .map_err(|e| format!("update: {e}"))?;
+    if rows == 0 {
+        return Err("pago no encontrado".into());
+    }
+    get_payment(conn, id)
+}
+
+/// Marca un pago como pagado o pendiente (realizado vs planificado).
+pub fn marcar_pago(conn: &Connection, id: i64, estado: &str) -> Result<Payment, String> {
+    if estado != "pagado" && estado != "pendiente" {
+        return Err("estado inválido".into());
+    }
+    let rows = conn
+        .execute(
+            "UPDATE payments SET estado = ?1 WHERE id = ?2",
+            params![estado, id],
         )
         .map_err(|e| format!("update: {e}"))?;
     if rows == 0 {
@@ -208,6 +246,12 @@ pub fn query_payments(conn: &Connection, f: &PaymentFilter) -> Result<Vec<Paymen
         if t == "ingreso" || t == "gasto" {
             sql.push_str(" AND p.tipo = ?");
             args.push(t.clone());
+        }
+    }
+    if let Some(e) = &f.estado {
+        if e == "pagado" || e == "pendiente" {
+            sql.push_str(" AND p.estado = ?");
+            args.push(e.clone());
         }
     }
     if let Some(m) = &f.mes {
@@ -250,7 +294,7 @@ pub fn month_summary(conn: &Connection, mes: &str) -> Result<MonthSummary, Strin
             "SELECT SUM(CASE WHEN tipo = 'ingreso' THEN monto_cents END),
                     SUM(CASE WHEN tipo = 'gasto' THEN monto_cents END),
                     COUNT(*)
-             FROM payments WHERE substr(fecha, 1, 7) = ?1",
+             FROM payments WHERE substr(fecha, 1, 7) = ?1 AND estado = 'pagado'",
             params![mes],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
@@ -978,7 +1022,7 @@ pub fn generar_recurrentes(conn: &Connection, hoy: &str) -> Result<i64, String> 
         let mut guard = 0;
         while next.as_str() <= hoy && guard < 365 {
             conn.execute(
-                "INSERT INTO payments (tipo, monto_cents, fecha, categoria_id, contacto_id, descripcion, recurrente, comprobante_path, serie_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'none', ?7, ?8)",
+                "INSERT INTO payments (tipo, monto_cents, fecha, categoria_id, contacto_id, descripcion, recurrente, comprobante_path, serie_id, estado) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'none', ?7, ?8, 'pendiente')",
                 params![
                     t.tipo,
                     t.monto_cents,
@@ -1037,7 +1081,7 @@ pub fn list_budgets(conn: &Connection, mes: &str) -> Result<Vec<BudgetView>, Str
     let mut stmt = conn
         .prepare(
             "SELECT b.id, b.categoria_id, c.nombre, c.color, b.monto_cents,
-                    COALESCE((SELECT SUM(p.monto_cents) FROM payments p WHERE p.categoria_id = c.id AND p.tipo = 'gasto' AND substr(p.fecha, 1, 7) = ?1), 0)
+                    COALESCE((SELECT SUM(p.monto_cents) FROM payments p WHERE p.categoria_id = c.id AND p.tipo = 'gasto' AND p.estado = 'pagado' AND substr(p.fecha, 1, 7) = ?1), 0)
              FROM budgets b JOIN categories c ON c.id = b.categoria_id ORDER BY c.nombre",
         )
         .map_err(|e| format!("prepare: {e}"))?;
@@ -1100,6 +1144,7 @@ mod tests {
             descripcion: "prueba".into(),
             recurrente: "none".into(),
             comprobante_path: "".into(),
+            estado: "pagado".into(),
         }
     }
 
@@ -1396,5 +1441,80 @@ mod tests {
         let pts = resumen_mensual(&conn, vec!["2026-09".to_string()]).unwrap();
         assert_eq!(pts.len(), 1);
         assert_eq!(pts[0].gastos_cents, 3000);
+    }
+
+    #[test]
+    fn pendiente_no_afecta_resumen() {
+        let conn = mem();
+        let mut p = sample("gasto", 50.0, "2026-09-10");
+        p.estado = "pendiente".into();
+        insert_payment(&conn, &p).unwrap();
+        insert_payment(&conn, &sample("gasto", 20.0, "2026-09-11")).unwrap();
+        let s = month_summary(&conn, "2026-09").unwrap();
+        assert_eq!(s.gastos_cents, 2000);
+        assert_eq!(s.count, 1);
+        let f = PaymentFilter {
+            estado: Some("pendiente".into()),
+            limite: 100,
+            ..Default::default()
+        };
+        assert_eq!(query_payments(&conn, &f).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn marcar_pago_cambia_estado() {
+        let conn = mem();
+        let p = insert_payment(&conn, &sample("gasto", 15.0, "2026-09-10")).unwrap();
+        assert_eq!(p.estado, "pagado");
+        let m = marcar_pago(&conn, p.id, "pendiente").unwrap();
+        assert_eq!(m.estado, "pendiente");
+        assert!(marcar_pago(&conn, p.id, "otro").is_err());
+        assert!(marcar_pago(&conn, 9999, "pagado").is_err());
+    }
+
+    #[test]
+    fn migracion_v3_futuros_pendientes() {
+        // Simula DB v1: esquema base sin serie_id/estado, versión 0.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;
+             CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, tipo TEXT NOT NULL,
+               monto_cents INTEGER NOT NULL, fecha TEXT NOT NULL,
+               categoria_id INTEGER, descripcion TEXT NOT NULL DEFAULT '',
+               contacto_id INTEGER, comprobante_path TEXT NOT NULL DEFAULT '',
+               recurrente TEXT NOT NULL DEFAULT 'none', created_at TEXT NOT NULL DEFAULT (datetime('now')));
+             CREATE TABLE categories (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL,
+               color TEXT NOT NULL DEFAULT '#10b981', tipo TEXT NOT NULL DEFAULT 'ambos');
+             CREATE TABLE contacts (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL,
+               telefono TEXT NOT NULL DEFAULT '', nota TEXT NOT NULL DEFAULT '',
+               created_at TEXT NOT NULL DEFAULT (datetime('now')));
+             CREATE TABLE debts (id INTEGER PRIMARY KEY AUTOINCREMENT, direccion TEXT NOT NULL,
+               persona TEXT NOT NULL, contacto_id INTEGER, monto_total_cents INTEGER NOT NULL,
+               saldo_cents INTEGER NOT NULL, fecha_limite TEXT NOT NULL DEFAULT '',
+               estado TEXT NOT NULL DEFAULT 'activa', notas TEXT NOT NULL DEFAULT '',
+               created_at TEXT NOT NULL DEFAULT (datetime('now')));
+             CREATE TABLE debt_payments (id INTEGER PRIMARY KEY AUTOINCREMENT, debt_id INTEGER NOT NULL,
+               monto_cents INTEGER NOT NULL, fecha TEXT NOT NULL, nota TEXT NOT NULL DEFAULT '');
+             CREATE TABLE reminders (id INTEGER PRIMARY KEY AUTOINCREMENT, titulo TEXT NOT NULL,
+               detalle TEXT NOT NULL DEFAULT '', fecha_hora TEXT NOT NULL,
+               repetir TEXT NOT NULL DEFAULT 'none', payment_id INTEGER, debt_id INTEGER,
+               sonido INTEGER NOT NULL DEFAULT 1, persistente INTEGER NOT NULL DEFAULT 1,
+               hecho INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+             CREATE TABLE settings (clave TEXT PRIMARY KEY, valor TEXT NOT NULL DEFAULT '');
+             CREATE TABLE budgets (id INTEGER PRIMARY KEY AUTOINCREMENT,
+               categoria_id INTEGER NOT NULL UNIQUE, monto_cents INTEGER NOT NULL);
+             INSERT INTO payments (tipo, monto_cents, fecha, descripcion) VALUES ('gasto', 1000, '2000-01-01', 'viejo');
+             INSERT INTO payments (tipo, monto_cents, fecha, descripcion) VALUES ('gasto', 2000, '2099-01-01', 'futuro');",
+        )
+        .unwrap();
+        init(&conn).unwrap();
+        let viejo = get_payment(&conn, 1).unwrap();
+        let futuro = get_payment(&conn, 2).unwrap();
+        assert_eq!(viejo.estado, "pagado");
+        assert_eq!(futuro.estado, "pendiente");
+        let v: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, 3);
     }
 }

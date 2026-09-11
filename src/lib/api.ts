@@ -40,6 +40,7 @@ export function listPayments(f: {
   tipo?: string;
   mes?: string;
   buscar?: string;
+  estado?: string;
   limite?: number;
 }): Promise<Payment[]> {
   if (isPreview()) return mock.listPayments(f);
@@ -47,6 +48,7 @@ export function listPayments(f: {
     tipo: f.tipo ?? null,
     mes: f.mes ?? null,
     buscar: f.buscar ?? null,
+    estado: f.estado ?? null,
     limite: f.limite ?? null,
   });
 }
@@ -67,6 +69,11 @@ export function updatePayment(
 export function deletePayment(id: number): Promise<void> {
   if (isPreview()) return mock.deletePayment(id);
   return invoke<void>("delete_payment", { id });
+}
+
+export function marcarPago(id: number, estado: string): Promise<Payment> {
+  if (isPreview()) return mock.marcarPago(id, estado);
+  return invoke<Payment>("marcar_pago", { id, estado });
 }
 
 export function paymentsSummary(mes: string): Promise<MonthSummary> {

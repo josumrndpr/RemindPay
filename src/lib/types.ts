@@ -38,6 +38,7 @@ export interface Payment {
   comprobante_path: string;
   recurrente: Recurrence;
   serie_id?: number | null;
+  estado: "pagado" | "pendiente";
   created_at: string;
 }
 
@@ -51,6 +52,7 @@ export interface NewPaymentInput {
   descripcion: string;
   recurrente: Recurrence;
   comprobante_path: string;
+  estado: "pagado" | "pendiente";
 }
 
 export interface MonthSummary {
@@ -166,6 +168,7 @@ export type Section =
   | "dashboard"
   | "pagos"
   | "deudas"
+  | "planificador"
   | "recordatorios"
   | "contactos"
   | "config";

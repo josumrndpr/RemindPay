@@ -6,6 +6,7 @@ import {
   listCategories,
   listPayments,
   listReminders,
+  marcarPago,
   paymentsSummary,
   resumenMensual,
   setBudget,
@@ -16,6 +17,7 @@ import {
   fmtUSD,
   monthLabel,
   monthLocal,
+  todayLocal,
 } from "../lib/format";
 import type {
   BudgetView,
@@ -27,6 +29,7 @@ import type {
 } from "../lib/types";
 import Modal from "./Modal";
 import {
+  Badge,
   ErrorBox,
   Icon,
   Stat,
@@ -271,6 +274,7 @@ export default function Dashboard({
   const [debts, setDebts] = useState<DebtsSummary | null>(null);
   const [proximos, setProximos] = useState({ total: 0, vencidos: 0 });
   const [recent, setRecent] = useState<Payment[]>([]);
+  const [upcoming, setUpcoming] = useState<Payment[]>([]);
   const [chart, setChart] = useState<MonthPoint[]>([]);
   const [budgets, setBudgets] = useState<BudgetView[]>([]);
   const [showBudgets, setShowBudgets] = useState(false);
@@ -280,19 +284,24 @@ export default function Dashboard({
     setError(null);
     try {
       const meses = ultimos6(mes);
-      const [s, d, r, rems, ch, b] = await Promise.all([
+      const [s, d, r, rems, ch, b, pend] = await Promise.all([
         paymentsSummary(mes),
         debtsSummary(),
-        listPayments({ limite: 8 }),
+        listPayments({ estado: "pagado", limite: 8 }),
         listReminders({ solo_pendientes: true, limite: 500 }),
         resumenMensual(meses),
         listBudgets(mes),
+        listPayments({ estado: "pendiente", limite: 200 }),
       ]);
       setSummary(s);
       setDebts(d);
       setRecent(r);
       setChart(ch);
       setBudgets(b);
+      const ordenados = [...pend].sort((a, c) =>
+        a.fecha === c.fecha ? a.id - c.id : a.fecha.localeCompare(c.fecha),
+      );
+      setUpcoming(ordenados.slice(0, 6));
       const ahora = ahoraLocal();
       const max = new Date();
       max.setDate(max.getDate() + 7);
@@ -311,6 +320,17 @@ export default function Dashboard({
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function marcar(id: number) {
+    try {
+      await marcarPago(id, "pagado");
+      await load();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  const hoy = todayLocal();
 
   return (
     <div>
@@ -355,7 +375,7 @@ export default function Dashboard({
           tone="green"
           title="Balance del mes"
           value={fmtUSD(summary?.balance_cents ?? 0)}
-          hint={`${summary?.count ?? 0} movimientos`}
+          hint={`${summary?.count ?? 0} pagos realizados`}
           accent
         />
         <Stat
@@ -363,14 +383,14 @@ export default function Dashboard({
           tone="green"
           title="Ingresos"
           value={fmtUSD(summary?.ingresos_cents ?? 0)}
-          hint="entradas del mes"
+          hint="cobrados del mes"
         />
         <Stat
           icon="wallet"
           tone="zinc"
           title="Gastos"
           value={fmtUSD(summary?.gastos_cents ?? 0)}
-          hint="salidas del mes"
+          hint="pagados del mes"
         />
         <Stat
           icon="bell"
@@ -397,6 +417,57 @@ export default function Dashboard({
           value={fmtUSD(debts?.por_pagar_cents ?? 0)}
           hint={`yo debo · ${debts?.activas ?? 0} deudas vivas`}
         />
+      </div>
+
+      <div className={`${cardCls} mt-4 p-5`}>
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+            Próximos pagos
+          </h3>
+          <span className="text-xs text-zinc-500">
+            pendientes por fecha · no tocan el balance
+          </span>
+        </div>
+        {upcoming.length === 0 ? (
+          <p className="py-4 text-center text-sm text-zinc-500">
+            Al día: nada pendiente por pagar.
+          </p>
+        ) : (
+          <div className="mt-3 divide-y divide-zinc-800/60">
+            {upcoming.map((p) => {
+              const vencido = p.fecha < hoy;
+              return (
+                <div
+                  key={p.id}
+                  className="flex items-center gap-3 py-2.5 text-sm"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium">
+                      {p.descripcion || (
+                        <span className="text-zinc-600">Sin descripción</span>
+                      )}
+                    </p>
+                    <p className="tnum text-xs text-zinc-500">
+                      {fmtFecha(p.fecha)}
+                      {p.categoria ? ` · ${p.categoria}` : ""}
+                    </p>
+                  </div>
+                  {vencido && <Badge tone="red">Vencido</Badge>}
+                  <p className="tnum whitespace-nowrap font-semibold">
+                    {p.tipo === "ingreso" ? "+" : "−"}
+                    {fmtUSD(p.monto_cents)}
+                  </p>
+                  <button
+                    onClick={() => void marcar(p.id)}
+                    className="shrink-0 rounded-lg bg-emerald-500 px-2.5 py-1.5 text-xs font-semibold text-zinc-950 transition-all hover:bg-emerald-400 active:scale-[.98]"
+                  >
+                    Ya lo pagué
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-5">
@@ -480,7 +551,7 @@ export default function Dashboard({
       <div className="mt-3 divide-y divide-zinc-800/60 overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-900/40">
         {recent.length === 0 ? (
           <p className="px-4 py-6 text-center text-sm text-zinc-500">
-            Aún no hay movimientos.
+            Aún no hay movimientos pagados.
           </p>
         ) : (
           recent.map((p) => (
