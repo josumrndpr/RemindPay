@@ -137,11 +137,25 @@ export async function chatCompletion(
     choices?: { message?: { content?: unknown } }[];
     usage?: ChatUsage;
   } | null;
-  const text = data?.choices?.[0]?.message?.content;
-  if (typeof text !== "string" || !text.trim()) {
+  const choice = data?.choices?.[0]?.message as
+    | {
+        content?: unknown;
+        reasoning_details?: { text?: unknown }[];
+        reasoning?: unknown;
+      }
+    | undefined;
+  let texto = typeof choice?.content === "string" ? choice.content : "";
+  if (!texto.trim() && Array.isArray(choice?.reasoning_details)) {
+    const r = choice.reasoning_details.find((d) => typeof d?.text === "string");
+    if (r && typeof r.text === "string") texto = r.text;
+  }
+  if (!texto.trim() && typeof choice?.reasoning === "string") {
+    texto = choice.reasoning;
+  }
+  if (!texto.trim()) {
     throw new Error("El modelo devolvió una respuesta vacía.");
   }
-  return { text: text.trim(), usage: data?.usage };
+  return { text: texto.trim(), usage: data?.usage };
 }
 
 export async function testConnection(cfg: AiConfig): Promise<string> {
@@ -152,7 +166,7 @@ export async function testConnection(cfg: AiConfig): Promise<string> {
     const r = await chatCompletion(
       { ...cfg, endpoint: base },
       [{ role: "user", content: "Responde con solo: ok" }],
-      { maxTokens: 5, temperature: 0, signal: ctrl.signal },
+      { maxTokens: 100, temperature: 0, signal: ctrl.signal },
     );
     return `Conexión OK · respondió: ${r.text.slice(0, 40)}`;
   } catch (e) {
