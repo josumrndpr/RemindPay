@@ -190,29 +190,42 @@ export const IDENTIDAD = [
   "Tu responsabilidad: ayudar al usuario a controlar su dinero con datos reales: registrar pagos, recordar vencimientos, planificar quincenas y alertar riesgos.",
   "Hablas español, breve y directa, sin adornos ni emojis.",
   "Conoces la app: Dashboard (balance, próximos pagos, presupuestos, gráfico), Pagos (pagados/pendientes, recurrentes, comprobantes), Deudas (abonos), Planificador (simula la quincena), Recordatorios (avisos con sonido), Contactos, Configuración.",
-  "Reglas: nunca inventes cifras — solo las del contexto que se te da. Montos en USD. Fechas absolutas yyyy-MM-dd. Nada se guarda sin confirmación del usuario (la app la gestiona). Si algo está fuera de tu alcance, dilo en una frase y sugiere la alternativa más cercana.",
+  "Reglas: nunca inventes cifras — solo las del contexto que se te da. Montos en USD. Fechas absolutas yyyy-MM-dd. SÍ puedes crear pagos, deudas, abonos, avisos y contactos: emites la acción en JSON y la app pide confirmación al usuario antes de guardar. Solo di que algo está fuera de tu alcance si de verdad no existe esa acción.",
 ].join("\n");
 
-export function promptChatSistema(contexto: string): string {
-  return `${IDENTIDAD}\nHablas con los datos de abajo como única fuente de verdad.\n${contexto}`;
-}
-
-export function promptAccionesSistema(
-  categorias: string[],
-  pendientes: string[],
-): string {
+/**
+ * Prompt único de Aura: conversa con datos reales y, cuando el usuario pide
+ * CREAR/REGISTRAR/MARCAR algo con datos completos, añade al final un bloque
+ * ```json con UNA acción. Sin datos completos: solo texto preguntando.
+ */
+export function promptAuraSistema(args: {
+  contexto: string;
+  categorias: string[];
+  pendientes: string[];
+  deudas: string[];
+}): string {
+  const ahora = new Date();
+  const hoy = `${ahora.getFullYear()}-${String(ahora.getMonth() + 1).padStart(2, "0")}-${String(ahora.getDate()).padStart(2, "0")}`;
   return [
     IDENTIDAD,
-    "Modo acciones: conviertes el pedido del usuario en UNA acción JSON. Acciones disponibles:",
-    '1. {"accion":"registrar_pago","params":{"tipo":"ingreso"|"gasto","monto":12.5,"fecha":"2026-09-11","categoria":"Comida"|null,"descripcion":"..."}}',
-    '2. {"accion":"crear_recordatorio","params":{"titulo":"...","detalle":"","fecha_hora":"2026-09-12T09:00","repetir":"none"|"daily"|"weekly"|"monthly","sonido":true,"persistente":true}}',
-    '3. {"accion":"marcar_pagado","params":{"id":123}}',
-    `Hoy: ${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-${String(new Date().getDate()).padStart(2, "0")}. Fechas relativas ("ayer", "el lunes", "el 15") → absolutas yyyy-MM-dd / yyyy-MM-ddTHH:mm.`,
-    `Categorías: [${categorias.join(", ")}] (la más cercana o null).`,
-    pendientes.length > 0
-      ? `Pagos pendientes (para marcar_pagado usa SOLO estos ids):\n${pendientes.join("\n")}`
+    "Cómo respondes: texto normal en español, breve y directo. Si el usuario pide crear, registrar o marcar algo y tienes TODOS los datos, añade al final un bloque ```json con UNA acción (con una frase corta antes). Si falta algún dato, responde SOLO texto preguntándolo, SIN json.",
+    "Acciones disponibles:",
+    '1. {"accion":"registrar_pago","params":{"tipo":"ingreso"|"gasto","monto":12.5,"fecha":"yyyy-MM-dd","categoria":"Comida"|null,"descripcion":"..."}}',
+    '2. {"accion":"crear_deuda","params":{"direccion":"debo"|"me_deben","persona":"...","monto_total":200,"fecha_limite":"yyyy-MM-dd"|"","notas":""}} ("debo" = yo le debo a esa persona; "me_deben" = me deben a mí)',
+    '3. {"accion":"abonar_deuda","params":{"id":7,"monto":50,"fecha":"yyyy-MM-dd"}} (el id SOLO de la lista de deudas abiertas)',
+    '4. {"accion":"crear_recordatorio","params":{"titulo":"...","detalle":"","fecha_hora":"yyyy-MM-ddTHH:mm","repetir":"none"|"daily"|"weekly"|"monthly","sonido":true,"persistente":true}}',
+    '5. {"accion":"marcar_pagado","params":{"id":123}} (el id SOLO de la lista de pagos pendientes)',
+    '6. {"accion":"crear_contacto","params":{"nombre":"...","telefono":""|"...","nota":""}}',
+    `Hoy: ${hoy}. Fechas relativas ("ayer", "el lunes", "el 15", "mañana a las 9am") → absolutas yyyy-MM-dd / yyyy-MM-ddTHH:mm.`,
+    `Categorías: [${args.categorias.join(", ")}] (la más cercana o null).`,
+    args.pendientes.length > 0
+      ? `Pagos pendientes (para marcar_pagado usa SOLO estos ids):\n${args.pendientes.join("\n")}`
       : "No hay pagos pendientes.",
-    'Responde SOLO el JSON, sin markdown. Si falta info o hay ambigüedad: {"error":"pregunta corta"}.',
+    args.deudas.length > 0
+      ? `Deudas abiertas (para abonar_deuda usa SOLO estos ids):\n${args.deudas.join("\n")}`
+      : "No hay deudas abiertas.",
+    "Tus datos (única fuente de verdad):",
+    args.contexto,
   ].join("\n");
 }
 
@@ -244,10 +257,33 @@ export interface RecordatorioExtraido {
   persistente: boolean;
 }
 
+export interface DeudaExtraida {
+  direccion: "debo" | "me_deben";
+  persona: string;
+  monto_total: number;
+  fecha_limite: string;
+  notas: string;
+}
+
+export interface AbonoExtraido {
+  id: number;
+  monto: number;
+  fecha: string;
+}
+
+export interface ContactoExtraido {
+  nombre: string;
+  telefono: string;
+  nota: string;
+}
+
 export type AccionIA =
   | { accion: "registrar_pago"; params: PagoExtraido }
+  | { accion: "crear_deuda"; params: DeudaExtraida }
+  | { accion: "abonar_deuda"; params: AbonoExtraido }
   | { accion: "crear_recordatorio"; params: RecordatorioExtraido }
-  | { accion: "marcar_pagado"; params: { id: number } };
+  | { accion: "marcar_pagado"; params: { id: number } }
+  | { accion: "crear_contacto"; params: ContactoExtraido };
 
 function extraerJSON(texto: string): Record<string, unknown> {
   const limpio = texto
@@ -309,6 +345,59 @@ function validarRecordatorio(o: Record<string, unknown>): RecordatorioExtraido {
   };
 }
 
+function validarDeuda(o: Record<string, unknown>): DeudaExtraida {
+  if (o["direccion"] !== "debo" && o["direccion"] !== "me_deben") {
+    throw new Error("¿Tú le debes o te deben?");
+  }
+  const persona =
+    typeof o["persona"] === "string" ? o["persona"].trim() : "";
+  if (!persona) throw new Error("¿Con quién es la deuda?");
+  const monto = o["monto_total"];
+  if (typeof monto !== "number" || !Number.isFinite(monto) || monto <= 0) {
+    throw new Error("¿Por cuánto es la deuda?");
+  }
+  const fl = typeof o["fecha_limite"] === "string" ? o["fecha_limite"] : "";
+  if (fl !== "" && fl.length !== 10) {
+    throw new Error("¿Para cuándo es la fecha límite?");
+  }
+  return {
+    direccion: o["direccion"],
+    persona: persona.slice(0, 120),
+    monto_total: monto,
+    fecha_limite: fl,
+    notas:
+      typeof o["notas"] === "string" ? o["notas"].slice(0, 500) : "",
+  };
+}
+
+function validarAbono(o: Record<string, unknown>): AbonoExtraido {
+  const id = o["id"];
+  if (typeof id !== "number" || !Number.isInteger(id) || id <= 0) {
+    throw new Error("¿A cuál deuda le abono? Dime la persona.");
+  }
+  const monto = o["monto"];
+  if (typeof monto !== "number" || !Number.isFinite(monto) || monto <= 0) {
+    throw new Error("¿Cuánto abonas?");
+  }
+  const fecha = o["fecha"];
+  if (typeof fecha !== "string" || fecha.length !== 10) {
+    throw new Error("¿Qué día fue el abono?");
+  }
+  return { id, monto, fecha };
+}
+
+function validarContacto(o: Record<string, unknown>): ContactoExtraido {
+  const nombre =
+    typeof o["nombre"] === "string" ? o["nombre"].trim() : "";
+  if (!nombre) throw new Error("¿Cómo se llama el contacto?");
+  return {
+    nombre: nombre.slice(0, 120),
+    telefono:
+      typeof o["telefono"] === "string" ? o["telefono"].slice(0, 40) : "",
+    nota: typeof o["nota"] === "string" ? o["nota"].slice(0, 500) : "",
+  };
+}
+
 /** Interpreta la respuesta del modelo como acción (o pregunta si falta info). */
 export function parseAccionJSON(texto: string): AccionIA {
   let o: Record<string, unknown>;
@@ -329,6 +418,11 @@ export function parseAccionJSON(texto: string): AccionIA {
   }
   const params = p as Record<string, unknown>;
   if (a === "registrar_pago") return { accion: a, params: validarPago(params) };
+  if (a === "crear_deuda") return { accion: a, params: validarDeuda(params) };
+  if (a === "abonar_deuda") return { accion: a, params: validarAbono(params) };
+  if (a === "crear_contacto") {
+    return { accion: a, params: validarContacto(params) };
+  }
   if (a === "crear_recordatorio") {
     return { accion: a, params: validarRecordatorio(params) };
   }
@@ -340,4 +434,35 @@ export function parseAccionJSON(texto: string): AccionIA {
     return { accion: a, params: { id } };
   }
   throw new Error("No entendí. Dime qué quieres hacer.");
+}
+
+/**
+ * Separa la respuesta del modelo en texto visible + acción opcional.
+ * El modelo puede devolver solo texto (conversar/preguntar) o texto
+ * más un bloque ```json con la acción a confirmar.
+ */
+export function extraerAccionRespuesta(texto: string): {
+  texto: string;
+  accion: AccionIA | null;
+} {
+  const fence = texto.match(/```json\s*([\s\S]*?)```/i);
+  const sinBloque = fence ? texto.replace(fence[0], "").trim() : texto;
+  let o: Record<string, unknown> | null = null;
+  try {
+    o = extraerJSON(fence ? fence[1] : texto);
+  } catch {
+    return { texto, accion: null };
+  }
+  if (!o || typeof o["accion"] !== "string") {
+    return { texto: sinBloque || texto, accion: null };
+  }
+  try {
+    return { texto: sinBloque, accion: parseAccionJSON(JSON.stringify(o)) };
+  } catch (e) {
+    if (sinBloque) return { texto: sinBloque, accion: null };
+    return {
+      texto: e instanceof Error ? e.message : "No entendí.",
+      accion: null,
+    };
+  }
 }
