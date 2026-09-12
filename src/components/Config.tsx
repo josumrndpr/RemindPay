@@ -110,12 +110,13 @@ export default function Config() {
   const [aiEndpoint, setAiEndpoint] = useState("");
   const [aiKey, setAiKey] = useState("");
   const [aiModel, setAiModel] = useState("");
+  const [aiProxy, setAiProxy] = useState("");
   const [aiMsg, setAiMsg] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
       try {
-        const [a, d, t, b, e, k, m] = await Promise.all([
+        const [a, d, t, b, e, k, m, px] = await Promise.all([
           isAutostart(),
           getDataDir(),
           getSetting("tema"),
@@ -123,6 +124,7 @@ export default function Config() {
           getSetting("ai_endpoint"),
           getSetting("ai_key"),
           getSetting("ai_model"),
+          getSetting("ai_proxy"),
         ]);
         setAuto(a);
         setDir(d);
@@ -131,6 +133,7 @@ export default function Config() {
         setAiEndpoint(e ?? "");
         setAiKey(k ?? "");
         setAiModel(m ?? "");
+        setAiProxy(px ?? "");
       } catch (e) {
         setMsg(String(e));
       }
@@ -202,6 +205,7 @@ export default function Config() {
         setSetting("ai_endpoint", aiEndpoint.trim().replace(/\/+$/, "")),
         setSetting("ai_key", aiKey.trim()),
         setSetting("ai_model", aiModel.trim()),
+        setSetting("ai_proxy", aiProxy.trim().replace(/\/+$/, "")),
       ]);
       flash("Asistente configurado");
     } catch (e) {
@@ -219,6 +223,7 @@ export default function Config() {
         endpoint: aiEndpoint.trim().replace(/\/+$/, ""),
         key: aiKey.trim(),
         model: aiModel.trim(),
+        proxy: aiProxy.trim().replace(/\/+$/, ""),
       });
       setAiMsg(r);
     } catch (e) {
@@ -422,6 +427,15 @@ export default function Config() {
                 className={inputCls}
               />
             </Field>
+            <Field label="Proxy (solo iPhone)">
+              <input
+                value={aiProxy}
+                onChange={(e) => setAiProxy(e.target.value)}
+                placeholder="https://tu-worker.workers.dev/TU_TOKEN (ver extras/aura-proxy-worker.js)"
+                inputMode="url"
+                className={`${inputCls} font-mono !text-xs`}
+              />
+            </Field>
             {aiMsg && (
               <p className="text-xs text-zinc-400">{aiMsg}</p>
             )}
@@ -527,7 +541,7 @@ export default function Config() {
         )}
 
         <div className="flex items-center gap-3 px-1 py-2 text-xs text-zinc-600">
-          <span>RemindPay 0.7.0 · 100% local · SQLite · USD</span>
+          <span>RemindPay 0.8.0 · 100% local · SQLite · USD</span>
         </div>
       </div>
     </div>

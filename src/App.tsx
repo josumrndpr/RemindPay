@@ -444,9 +444,8 @@ export default function App() {
             <div className="anim-rise mb-6 flex items-start gap-2.5 rounded-2xl border border-amber-800/70 bg-amber-950/50 px-4 py-3 text-sm text-amber-200">
               <Icon name="alert" size={16} className="mt-0.5 shrink-0" />
               <span>
-                Vista previa web con datos de ejemplo (se borran al recargar).
-                El backend real SQLite se activa al compilar la app de
-                escritorio.
+                PWA: tus datos se guardan en este navegador/dispositivo. En PC
+                la app usa SQLite local.
               </span>
             </div>
           )}

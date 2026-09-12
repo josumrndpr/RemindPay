@@ -423,9 +423,9 @@ export default function Asistente({ onIrConfig }: { onIrConfig: () => void }) {
 
       {isPreview() && (
         <div className={`${cardCls} mt-4 p-4 text-sm leading-relaxed text-zinc-400`}>
-          En iPhone o navegador Aura no puede conectar: tu proveedor (OpenCode
-          Go/Zen) no acepta conexiones desde el navegador. En la app de PC
-          funciona completo.
+          En iPhone Aura necesita tu proxy (Configuración → OpenCode Go/Zen →
+          Proxy): Go no acepta conexiones desde el navegador. En la app de PC
+          funciona directo.
         </div>
       )}
 

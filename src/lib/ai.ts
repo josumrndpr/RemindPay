@@ -9,23 +9,27 @@ export interface AiConfig {
   endpoint: string;
   key: string;
   model: string;
+  /** URL del proxy propio (Cloudflare Worker) para iPhone/PWA. Opcional. */
+  proxy: string;
 }
 
 export async function getAiConfig(): Promise<AiConfig> {
-  const [endpoint, key, model] = await Promise.all([
+  const [endpoint, key, model, proxy] = await Promise.all([
     getSetting("ai_endpoint"),
     getSetting("ai_key"),
     getSetting("ai_model"),
+    getSetting("ai_proxy"),
   ]);
   return {
-    endpoint: normalizarEndpoint(endpoint ?? ""),
+    endpoint: (endpoint ?? "").trim(),
     key: (key ?? "").trim(),
     model: (model ?? "").trim(),
+    proxy: (proxy ?? "").trim().replace(/\/+$/, ""),
   };
 }
 
 export function isAiConfigured(cfg: AiConfig): boolean {
-  return cfg.endpoint.length > 0 && cfg.model.length > 0;
+  return cfg.model.length > 0 && (cfg.endpoint.length > 0 || cfg.proxy.length > 0);
 }
 
 /** Acepta base URL o URL completa: recorta /chat/completions y slashes. */
@@ -76,18 +80,29 @@ export async function chatCompletion(
   opts?: { maxTokens?: number; temperature?: number; signal?: AbortSignal },
 ): Promise<{ text: string; usage?: ChatUsage }> {
   if (!isAiConfigured(cfg)) {
-    throw new Error("Configura tu endpoint y modelo en Configuración → Asistente IA");
+    throw new Error("Configura tu endpoint y modelo en Configuración → OpenCode Go / Zen");
   }
+  // Vía proxy (iPhone/PWA): la URL ya incluye el secreto y el Worker pone
+  // la clave. Directo (PC): endpoint + Authorization.
+  const viaProxy = cfg.proxy.length > 0;
+  const url = viaProxy
+    ? cfg.proxy
+    : `${normalizarEndpoint(cfg.endpoint)}/chat/completions`;
   let res: Response;
   try {
-    res = await httpFetch(`${cfg.endpoint}/chat/completions`, {
+    res = await httpFetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "User-Agent": "RemindPay",
-        "x-opencode-session": SESION_IA,
-        ...(cfg.key ? { Authorization: `Bearer ${cfg.key}` } : {}),
-      },
+      headers: viaProxy
+        ? {
+            "Content-Type": "application/json",
+            "x-opencode-session": SESION_IA,
+          }
+        : {
+            "Content-Type": "application/json",
+            "User-Agent": "RemindPay",
+            "x-opencode-session": SESION_IA,
+            ...(cfg.key ? { Authorization: `Bearer ${cfg.key}` } : {}),
+          },
       body: JSON.stringify({
         model: cfg.model,
         messages,
