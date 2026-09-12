@@ -49,6 +49,29 @@ const NAV_SYS: { id: Section; label: string; icon: "users" | "sliders" }[] = [
   { id: "config", label: "Configuración", icon: "sliders" },
 ];
 
+// Tabs visibles en la barra inferior móvil (el resto vive en "Más").
+const TABS_MOVIL: {
+  id: Section;
+  label: string;
+  icon: "dashboard" | "pagos" | "deudas" | "bell";
+}[] = [
+  { id: "dashboard", label: "Inicio", icon: "dashboard" },
+  { id: "pagos", label: "Pagos", icon: "pagos" },
+  { id: "deudas", label: "Deudas", icon: "deudas" },
+  { id: "recordatorios", label: "Avisos", icon: "bell" },
+];
+
+const MAS_MOVIL: {
+  id: Section;
+  label: string;
+  icon: "calendar" | "sparkles" | "users" | "sliders";
+}[] = [
+  { id: "planificador", label: "Planificador", icon: "calendar" },
+  { id: "asistente", label: "Asistente", icon: "sparkles" },
+  { id: "contactos", label: "Contactos", icon: "users" },
+  { id: "config", label: "Configuración", icon: "sliders" },
+];
+
 type Lock = "cargando" | "crear" | "pedir" | "ok";
 
 function NavButton({
@@ -89,6 +112,30 @@ function NavButton({
   );
 }
 
+function TabMovil({
+  active,
+  icon,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  icon: "dashboard" | "pagos" | "deudas" | "bell";
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex min-h-[52px] flex-col items-center justify-center gap-1 text-[10px] font-medium ${
+        active ? "text-emerald-300" : "text-zinc-500"
+      }`}
+    >
+      <Icon name={icon} size={22} className="shrink-0" />
+      {label}
+    </button>
+  );
+}
+
 export default function App() {
   const [lock, setLock] = useState<Lock>("cargando");
   const [section, setSection] = useState<Section>("dashboard");
@@ -99,6 +146,7 @@ export default function App() {
   const [bridgeMs, setBridgeMs] = useState<number | null>(null);
   const [dueItems, setDueItems] = useState<Reminder[]>([]);
   const [toast, setToast] = useState<string | null>(null);
+  const [masOpen, setMasOpen] = useState(false);
   const notifiedRef = useRef<Set<number>>(new Set());
   const backupRef = useRef(false);
 
@@ -315,10 +363,10 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col bg-zinc-950 text-zinc-50">
-      <Titlebar />
+      {!isPreview() && <Titlebar />}
       <div className="flex min-h-0 flex-1">
-      {/* Sidebar */}
-      <aside className="flex w-64 shrink-0 flex-col border-r border-zinc-800/80 bg-zinc-900/30">
+      {/* Sidebar (solo escritorio) */}
+      <aside className="hidden w-64 shrink-0 flex-col border-r border-zinc-800/80 bg-zinc-900/30 md:flex">
         <div className="flex items-center gap-2.5 px-5 pb-5 pt-6">
           <Logo />
           <div>
@@ -391,7 +439,7 @@ export default function App() {
 
       {/* Contenido */}
       <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-6xl p-8">
+        <div className="mx-auto w-full max-w-6xl p-4 pb-32 pt-[max(1rem,env(safe-area-inset-top))] md:p-8">
           {isPreview() && (
             <div className="anim-rise mb-6 flex items-start gap-2.5 rounded-2xl border border-amber-800/70 bg-amber-950/50 px-4 py-3 text-sm text-amber-200">
               <Icon name="alert" size={16} className="mt-0.5 shrink-0" />
@@ -420,6 +468,93 @@ export default function App() {
         </div>
       </main>
       </div>
+
+      {/* Barra inferior móvil (solo pantallas angostas) */}
+      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-zinc-800/80 bg-zinc-950/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
+        <div className="grid grid-cols-6 items-end px-1 pt-1.5">
+          {TABS_MOVIL.slice(0, 2).map((t) => (
+            <TabMovil
+              key={t.id}
+              active={section === t.id}
+              icon={t.icon}
+              label={t.label}
+              onClick={() => setSection(t.id)}
+            />
+          ))}
+          <button
+            onClick={nuevoPago}
+            aria-label="Nuevo pago"
+            className="mx-auto -mt-7 grid h-14 w-14 place-items-center rounded-full bg-emerald-500 text-zinc-950 shadow-lg shadow-emerald-500/30 active:scale-95"
+          >
+            <Icon name="plus" size={24} sw={2.2} />
+          </button>
+          {TABS_MOVIL.slice(2).map((t) => (
+            <TabMovil
+              key={t.id}
+              active={section === t.id}
+              icon={t.icon}
+              label={t.label}
+              onClick={() => setSection(t.id)}
+            />
+          ))}
+          <button
+            onClick={() => setMasOpen(true)}
+            aria-label="Más opciones"
+            className={`flex min-h-[52px] flex-col items-center justify-center gap-1 text-[10px] font-medium ${
+              MAS_MOVIL.some((m) => m.id === section)
+                ? "text-emerald-300"
+                : "text-zinc-500"
+            }`}
+          >
+            <span className="flex gap-1">
+              <span className="h-1 w-1 rounded-full bg-current" />
+              <span className="h-1 w-1 rounded-full bg-current" />
+              <span className="h-1 w-1 rounded-full bg-current" />
+            </span>
+            Más
+          </button>
+        </div>
+      </nav>
+
+      {/* Hoja "Más" */}
+      {masOpen && (
+        <div className="fixed inset-0 z-40 md:hidden">
+          <div
+            className="anim-fade absolute inset-0 bg-black/60"
+            onClick={() => setMasOpen(false)}
+          />
+          <div className="anim-pop absolute inset-x-0 bottom-0 rounded-t-3xl border-t border-zinc-800 bg-zinc-900 p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+            <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-zinc-700" />
+            {MAS_MOVIL.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => {
+                  setSection(m.id);
+                  setMasOpen(false);
+                }}
+                className={`flex min-h-[52px] w-full items-center gap-3 rounded-xl px-3 text-left text-[15px] ${
+                  section === m.id
+                    ? "bg-emerald-500/15 font-semibold text-emerald-300"
+                    : "text-zinc-200"
+                }`}
+              >
+                <Icon name={m.icon} size={19} className="shrink-0" />
+                {m.label}
+              </button>
+            ))}
+            <button
+              onClick={() => {
+                setMasOpen(false);
+                setLock("pedir");
+              }}
+              className="flex min-h-[52px] w-full items-center gap-3 rounded-xl px-3 text-left text-[15px] text-zinc-200"
+            >
+              <Icon name="lock" size={19} className="shrink-0" />
+              Bloquear
+            </button>
+          </div>
+        </div>
+      )}
 
       {toast && (
         <div className="anim-rise fixed bottom-4 left-4 z-40 flex max-w-sm items-center gap-2.5 rounded-2xl border border-emerald-800 bg-zinc-900 px-4 py-3 text-sm shadow-2xl">

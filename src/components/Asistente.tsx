@@ -6,6 +6,7 @@ import {
   createPayment,
   createReminder,
   debtsSummary,
+  isPreview,
   listCategories,
   listDebts,
   listPayments,
@@ -417,6 +418,14 @@ export default function Asistente({ onIrConfig }: { onIrConfig: () => void }) {
           <button onClick={onIrConfig} className={`${btnSecondary} shrink-0 !text-xs`}>
             Ir a Configuración
           </button>
+        </div>
+      )}
+
+      {isPreview() && (
+        <div className={`${cardCls} mt-4 p-4 text-sm leading-relaxed text-zinc-400`}>
+          En iPhone o navegador Aura no puede conectar: tu proveedor (OpenCode
+          Go/Zen) no acepta conexiones desde el navegador. En la app de PC
+          funciona completo.
         </div>
       )}
 

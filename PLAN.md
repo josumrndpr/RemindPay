@@ -46,6 +46,7 @@ Sidebar: Dashboard / Pagos / Deudas / Recordatorios / Contactos / Config. PIN ga
 - [x] **0.5.4** — Fix modelos razonadores (mimo): fallback a `reasoning_details` si `content` viene null + test con 100 tokens. Clave/endpoint/modelo verificados en vivo (200 OK).
 - [x] **0.5.5** — Causa raíz del "no se pudo contactar": `http:default` no autoriza ningún origen; scope explícito `https://opencode.ai/**` (Go/Zen) + errores de red con detalle real.
 - [x] **0.6.0** — Aura ejecutora en un solo modo (sin pestañas): crea pagos, deudas, abonos, avisos, contactos y marca pagados desde lenguaje natural, todo con tarjeta de confirmación. El chat ya no dice "no puedo".
+- [x] **0.7.0 (M1 iPhone)** — PWA instalable (manifest, iconos, service worker offline) + shell mobile-first (barra inferior con botón + central, hoja "Más", safe-areas, sin zoom iOS). Aura avisada como no disponible en navegador (Go/Zen sin CORS).
 
 ## Requisito de máquina (Windows)
 Para `tauri dev` / `tauri build` hace falta VS 2022 con workload **"Desarrollo para el escritorio con C++"** + WebView2 (ya lo tienes). Sin eso: `npm run dev` (solo web) y `cargo check` sí funcionan. Instálalo desde Visual Studio Installer → Modificar → marcar C++ → Instalar (~6GB).

@@ -201,3 +201,23 @@ body {
 .light [class*="border-amber-700"] {
   border-color: #fcd34d !important;
 }
+
+/* ── Móvil / PWA (iPhone) ── */
+html {
+  -webkit-text-size-adjust: 100%;
+}
+body {
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+}
+/* iOS hace zoom si el input es <16px: se fija solo en táctil. */
+@media (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
