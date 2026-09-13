@@ -2,7 +2,8 @@
 // Misma superficie que api.ts espera del backend Rust (db.rs): mismas
 // validaciones, filtros, ordenamientos y reglas (centavos, pagado/pendiente,
 // abonos con tope, vencidas derivadas, recurrentes por serie).
-import { all, del, idb, kvGet, kvSet, put } from "./idb";
+import { all, clearStore, del, idb, kvGet, kvSet, put } from "./idb";
+import { validarRespaldo } from "./respaldo";
 import type {
   BackupInfo,
   BudgetView,
@@ -735,6 +736,23 @@ export async function listBackups(): Promise<BackupInfo[]> {
 }
 
 export async function createBackup(stamp: string): Promise<BackupInfo> {
+  const { nombre, json } = await volcado(stamp);
+  const b: BackupInfo = {
+    nombre,
+    bytes: new Blob([json]).size,
+    creado_secs: Math.floor(Date.now() / 1000),
+  };
+  await put("backups", { ...b, json });
+  const rows = await all<{ id: number }>("backups");
+  const viejos = rows
+    .sort((a, b) => a.id - b.id)
+    .slice(0, Math.max(0, rows.length - 30));
+  await Promise.all(viejos.map((r) => del("backups", r.id)));
+  return b;
+}
+
+/** Construye el volcado portable (mismo formato que el PC). */
+async function volcado(stamp: string): Promise<{ nombre: string; json: string }> {
   const [payments, debts, debtPayments, contacts, reminders, budgets, cats] =
     await Promise.all([
       all("payments"),
@@ -745,6 +763,16 @@ export async function createBackup(stamp: string): Promise<BackupInfo> {
       all("budgets"),
       getCats(),
     ]);
+  const ajustes: { clave: string; valor: string }[] = [];
+  for (const clave of [
+    "tema",
+    "ai_endpoint",
+    "ai_model",
+    "ai_proxy",
+  ]) {
+    const valor = await kvGet(`s:${clave}`);
+    if (valor !== null) ajustes.push({ clave, valor });
+  }
   const json = JSON.stringify({
     app: "remindpay",
     v: 1,
@@ -756,17 +784,51 @@ export async function createBackup(stamp: string): Promise<BackupInfo> {
     contacts,
     reminders,
     budgets,
+    settings: ajustes,
   });
-  const b: BackupInfo = {
-    nombre: `remindpay-${stamp}.json`,
-    bytes: new Blob([json]).size,
-    creado_secs: Math.floor(Date.now() / 1000),
-  };
-  await put("backups", { ...b, json });
-  const rows = await all<{ id: number }>("backups");
-  const viejos = rows.sort((a, b) => a.id - b.id).slice(0, Math.max(0, rows.length - 30));
-  await Promise.all(viejos.map((r) => del("backups", r.id)));
-  return b;
+  return { nombre: `remindpay-${stamp}.json`, json };
+}
+
+/** Exporta todo para llevar a otro dispositivo (no guarda copia local). */
+export async function exportarRespaldoWeb(
+  stamp: string,
+): Promise<{ nombre: string; json: string }> {
+  return volcado(stamp);
+}
+
+/** Importa un respaldo (reemplazo total). Devuelve resumen. */
+export async function importarRespaldoWeb(json: string): Promise<string> {
+  const d = validarRespaldo(json);
+  await idb();
+  await Promise.all([
+    "payments",
+    "debts",
+    "debt_payments",
+    "contacts",
+    "reminders",
+    "budgets",
+  ].map((s) => clearStore(s)));
+  await kvSet("categories", JSON.stringify(d.categories));
+  await Promise.all([
+    ...d.payments.map((r) => put("payments", r)),
+    ...d.debts.map((r) => put("debts", r)),
+    ...d.debt_payments.map((r) => put("debt_payments", r)),
+    ...d.contacts.map((r) => put("contacts", r)),
+    ...d.reminders.map((r) => put("reminders", r)),
+    ...d.budgets.map((r) => put("budgets", r)),
+  ]);
+  for (const s of d.settings ?? []) {
+    if (
+      !s.clave ||
+      s.clave === "ai_key" ||
+      s.clave === "pin_hash" ||
+      s.clave === "pin_salt"
+    ) {
+      continue;
+    }
+    await kvSet(`s:${s.clave}`, s.valor);
+  }
+  return `${d.payments.length} pagos, ${d.debts.length} deudas, ${d.reminders.length} avisos`;
 }
 
 // ── Recurrentes, presupuestos, resumen ──

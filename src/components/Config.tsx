@@ -1,21 +1,29 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   createBackup,
+  exportarRespaldo,
   getDataDir,
   getSetting,
+  importarRespaldo,
   isAutostart,
   isPreview,
   listBackups,
   listDebts,
   listPayments,
   listReminders,
+  readTextFile,
   setAutostart,
   setSetting,
   verifyPin,
   setPin,
 } from "../lib/api";
 import { testConnection } from "../lib/ai";
+import {
+  descargarRespaldo,
+  resumenRespaldo,
+  validarRespaldo,
+} from "../lib/respaldo";
 import {
   ahoraArchivo,
   fmtBackupFecha,
@@ -244,6 +252,77 @@ export default function Config() {
     } finally {
       setBusy(false);
     }
+  }
+
+  const fileRespRef = useRef<HTMLInputElement>(null);
+
+  /** Exporta todo a JSON: en PC pide dónde guardar, en iPhone lo descarga. */
+  async function exportarTodo() {
+    setBusy(true);
+    try {
+      const { nombre, json } = await exportarRespaldo(ahoraArchivo());
+      if (isPreview()) {
+        descargarRespaldo(nombre, json);
+        flash(`Exportado: ${nombre} (compártelo al otro dispositivo)`);
+      } else {
+        const { save } = await import("@tauri-apps/plugin-dialog");
+        const dest = await save({
+          defaultPath: nombre,
+          filters: [{ name: "Respaldo", extensions: ["json"] }],
+        });
+        if (typeof dest === "string") {
+          const { writeTextFile } = await import("../lib/api");
+          await writeTextFile(dest, json);
+          flash(`Exportado: ${nombre}`);
+        }
+      }
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Importa un respaldo (reemplazo total, con confirmación). */
+  async function importarTexto(texto: string, origen: string) {
+    setBusy(true);
+    try {
+      const d = validarRespaldo(texto);
+      const okGo = window.confirm(
+        `Reemplazar TODO lo de este dispositivo con ${origen}? Trae ${resumenRespaldo(d)}. No se puede deshacer.`,
+      );
+      if (!okGo) return;
+      const msg = await importarRespaldo(texto);
+      setBackups(await listBackups());
+      flash(`Importado: ${msg}`);
+      setTimeout(() => window.location.reload(), 1200);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function importarPc() {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const ruta = await open({
+        multiple: false,
+        filters: [{ name: "Respaldo", extensions: ["json"] }],
+      });
+      if (typeof ruta === "string") {
+        await importarTexto(await readTextFile(ruta), ruta);
+      }
+    } catch (e) {
+      fail(e);
+    }
+  }
+
+  async function importarArchivo(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    await importarTexto(await file.text(), file.name);
   }
 
   async function exportar(cual: "pagos" | "deudas" | "recordatorios") {
@@ -475,6 +554,36 @@ export default function Config() {
             <Icon name="plus" size={15} />
             Crear copia ahora
           </button>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <button
+              onClick={() => void exportarTodo()}
+              disabled={busy}
+              className={btnSecondary}
+            >
+              Exportar todo (JSON)
+            </button>
+            <button
+              onClick={() => {
+                if (isPreview()) fileRespRef.current?.click();
+                else void importarPc();
+              }}
+              disabled={busy}
+              className={btnSecondary}
+            >
+              Importar respaldo
+            </button>
+          </div>
+          <input
+            ref={fileRespRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={(e) => void importarArchivo(e)}
+          />
+          <p className="mt-2 text-xs text-zinc-500">
+            Pasa datos entre PC e iPhone: exporta aquí, importa allá. No
+            incluye clave IA ni PIN (cada dispositivo guarda los suyos).
+          </p>
           {backups.length === 0 ? (
             <p className="mt-3 text-sm text-zinc-500">Aún no hay copias.</p>
           ) : (
@@ -541,7 +650,7 @@ export default function Config() {
         )}
 
         <div className="flex items-center gap-3 px-1 py-2 text-xs text-zinc-600">
-          <span>RemindPay 0.8.0 · 100% local · SQLite · USD</span>
+          <span>RemindPay 0.9.0 · 100% local · SQLite · USD</span>
         </div>
       </div>
     </div>

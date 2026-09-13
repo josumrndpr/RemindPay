@@ -1517,4 +1517,220 @@ mod tests {
             .unwrap();
         assert_eq!(v, 3);
     }
+
+    #[test]
+    fn respaldo_ida_y_vuelta() {
+        let conn = mem();
+        insert_payment(&conn, &sample("gasto", 9.5, "2026-09-10")).unwrap();
+        let json = dump_respaldo(&conn, "t").unwrap();
+        assert!(json.contains("\"app\":\"remindpay\""));
+        let msg = restore_respaldo(&conn, &json).unwrap();
+        assert!(msg.contains("1 pagos"));
+        let f = PaymentFilter {
+            limite: 10,
+            ..Default::default()
+        };
+        assert_eq!(query_payments(&conn, &f).unwrap().len(), 1);
+        assert!(restore_respaldo(&conn, "{}").is_err());
+        assert!(restore_respaldo(&conn, "no-json").is_err());
+    }
+}
+
+// ── Respaldo portable M3 (exportar/importar PC↔iPhone) ─────────────────────
+
+/// Lee una tabla como JSON (columnas dinámicas por tipo SQLite).
+fn tabla_json(
+    conn: &Connection,
+    sql: &str,
+    cols: &[&str],
+) -> Result<Vec<serde_json::Value>, String> {
+    let mut stmt = conn.prepare(sql).map_err(|e| format!("dump: {e}"))?;
+    let empty: &[&dyn rusqlite::ToSql] = &[];
+    let rows = stmt
+        .query_map(empty, |r| {
+            let mut m = serde_json::Map::new();
+            for (i, c) in cols.iter().enumerate() {
+                let v: rusqlite::types::Value = r.get(i)?;
+                m.insert(
+                    (*c).to_string(),
+                    match v {
+                        rusqlite::types::Value::Null => serde_json::Value::Null,
+                        rusqlite::types::Value::Integer(x) => serde_json::json!(x),
+                        rusqlite::types::Value::Real(x) => serde_json::json!(x),
+                        rusqlite::types::Value::Text(s) => {
+                            serde_json::Value::String(s)
+                        }
+                        rusqlite::types::Value::Blob(b) => serde_json::json!(b),
+                    },
+                );
+            }
+            Ok(m)
+        })
+        .map_err(|e| format!("dump: {e}"))?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(serde_json::Value::Object(
+            r.map_err(|e| format!("dump: {e}"))?,
+        ));
+    }
+    Ok(out)
+}
+
+/// Volcado completo JSON. Excluye secretos (ai_key, pin_hash, pin_salt):
+/// cada dispositivo guarda los suyos.
+pub fn dump_respaldo(conn: &Connection, stamp: &str) -> Result<String, String> {
+    let doc = serde_json::json!({
+        "app": "remindpay",
+        "v": 1,
+        "stamp": stamp,
+        "categories": tabla_json(conn, "SELECT id, nombre, color, tipo FROM categories ORDER BY id", &["id", "nombre", "color", "tipo"])?,
+        "payments": tabla_json(conn, "SELECT id, tipo, monto_cents, fecha, categoria_id, contacto_id, descripcion, recurrente, comprobante_path, serie_id, estado, created_at FROM payments ORDER BY id", &["id", "tipo", "monto_cents", "fecha", "categoria_id", "contacto_id", "descripcion", "recurrente", "comprobante_path", "serie_id", "estado", "created_at"])?,
+        "debts": tabla_json(conn, "SELECT id, direccion, persona, contacto_id, monto_total_cents, saldo_cents, fecha_limite, estado, notas, created_at FROM debts ORDER BY id", &["id", "direccion", "persona", "contacto_id", "monto_total_cents", "saldo_cents", "fecha_limite", "estado", "notas", "created_at"])?,
+        "debt_payments": tabla_json(conn, "SELECT id, debt_id, monto_cents, fecha, nota FROM debt_payments ORDER BY id", &["id", "debt_id", "monto_cents", "fecha", "nota"])?,
+        "contacts": tabla_json(conn, "SELECT id, nombre, telefono, nota, created_at FROM contacts ORDER BY id", &["id", "nombre", "telefono", "nota", "created_at"])?,
+        "reminders": tabla_json(conn, "SELECT id, titulo, detalle, fecha_hora, repetir, payment_id, debt_id, sonido, persistente, hecho, created_at FROM reminders ORDER BY id", &["id", "titulo", "detalle", "fecha_hora", "repetir", "payment_id", "debt_id", "sonido", "persistente", "hecho", "created_at"])?,
+        "budgets": tabla_json(conn, "SELECT id, categoria_id, monto_cents FROM budgets ORDER BY id", &["id", "categoria_id", "monto_cents"])?,
+        "settings": tabla_json(conn, "SELECT clave, valor FROM settings WHERE clave NOT IN ('ai_key', 'pin_hash', 'pin_salt')", &["clave", "valor"])?,
+    });
+    serde_json::to_string(&doc).map_err(|e| format!("json: {e}"))
+}
+
+fn ji(v: &serde_json::Value) -> i64 {
+    v.as_i64().unwrap_or(0)
+}
+fn js(v: &serde_json::Value) -> String {
+    v.as_str().unwrap_or("").to_string()
+}
+fn jo(v: &serde_json::Value) -> Option<i64> {
+    v.as_i64()
+}
+fn jb(v: &serde_json::Value) -> bool {
+    v.as_bool()
+        .unwrap_or_else(|| v.as_i64().unwrap_or(0) != 0)
+}
+
+/// Restaura un volcado (reemplazo total) en una transacción.
+/// Devuelve resumen "N pagos, M deudas, K avisos".
+pub fn restore_respaldo(conn: &Connection, json: &str) -> Result<String, String> {
+    let doc: serde_json::Value = serde_json::from_str(json)
+        .map_err(|_| "respaldo inválido: no es JSON".to_string())?;
+    if doc.get("app").and_then(|v| v.as_str()) != Some("remindpay") {
+        return Err("respaldo inválido: no es de RemindPay".into());
+    }
+    let arr = |k: &str| -> Result<Vec<serde_json::Value>, String> {
+        doc.get(k)
+            .and_then(|v| v.as_array())
+            .cloned()
+            .ok_or_else(|| format!("respaldo inválido: falta {k}"))
+    };
+    let cats = arr("categories")?;
+    let pays = arr("payments")?;
+    let debts = arr("debts")?;
+    let abonos = arr("debt_payments")?;
+    let contacts = arr("contacts")?;
+    let rems = arr("reminders")?;
+    let budgets = arr("budgets")?;
+    let settings = doc
+        .get("settings")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .map_err(|e| format!("restore: {e}"))?;
+    let r: Result<String, String> = (|| {
+        conn.execute_batch("DELETE FROM debt_payments; DELETE FROM payments; DELETE FROM debts; DELETE FROM reminders; DELETE FROM contacts; DELETE FROM categories; DELETE FROM budgets;")
+            .map_err(|e| format!("limpiar: {e}"))?;
+        for c in &cats {
+            conn.execute(
+                "INSERT INTO categories (id, nombre, color, tipo) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![ji(&c["id"]), js(&c["nombre"]), js(&c["color"]), js(&c["tipo"])],
+            )
+            .map_err(|e| format!("categorías: {e}"))?;
+        }
+        for p in &pays {
+            conn.execute(
+                "INSERT INTO payments (id, tipo, monto_cents, fecha, categoria_id, contacto_id, descripcion, recurrente, comprobante_path, serie_id, estado, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+                rusqlite::params![ji(&p["id"]), js(&p["tipo"]), ji(&p["monto_cents"]), js(&p["fecha"]), jo(&p["categoria_id"]), jo(&p["contacto_id"]), js(&p["descripcion"]), js(&p["recurrente"]), js(&p["comprobante_path"]), jo(&p["serie_id"]), js(&p["estado"]), js(&p["created_at"])],
+            )
+            .map_err(|e| format!("pagos: {e}"))?;
+        }
+        for d in &debts {
+            conn.execute(
+                "INSERT INTO debts (id, direccion, persona, contacto_id, monto_total_cents, saldo_cents, fecha_limite, estado, notas, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+                rusqlite::params![ji(&d["id"]), js(&d["direccion"]), js(&d["persona"]), jo(&d["contacto_id"]), ji(&d["monto_total_cents"]), ji(&d["saldo_cents"]), js(&d["fecha_limite"]), js(&d["estado"]), js(&d["notas"]), js(&d["created_at"])],
+            )
+            .map_err(|e| format!("deudas: {e}"))?;
+        }
+        for a in &abonos {
+            conn.execute(
+                "INSERT INTO debt_payments (id, debt_id, monto_cents, fecha, nota) VALUES (?1,?2,?3,?4,?5)",
+                rusqlite::params![ji(&a["id"]), ji(&a["debt_id"]), ji(&a["monto_cents"]), js(&a["fecha"]), js(&a["nota"])],
+            )
+            .map_err(|e| format!("abonos: {e}"))?;
+        }
+        for c in &contacts {
+            conn.execute(
+                "INSERT INTO contacts (id, nombre, telefono, nota, created_at) VALUES (?1,?2,?3,?4,?5)",
+                rusqlite::params![ji(&c["id"]), js(&c["nombre"]), js(&c["telefono"]), js(&c["nota"]), js(&c["created_at"])],
+            )
+            .map_err(|e| format!("contactos: {e}"))?;
+        }
+        for m in &rems {
+            conn.execute(
+                "INSERT INTO reminders (id, titulo, detalle, fecha_hora, repetir, payment_id, debt_id, sonido, persistente, hecho, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+                rusqlite::params![ji(&m["id"]), js(&m["titulo"]), js(&m["detalle"]), js(&m["fecha_hora"]), js(&m["repetir"]), jo(&m["payment_id"]), jo(&m["debt_id"]), jb(&m["sonido"]), jb(&m["persistente"]), jb(&m["hecho"]), js(&m["created_at"])],
+            )
+            .map_err(|e| format!("avisos: {e}"))?;
+        }
+        for b in &budgets {
+            conn.execute(
+                "INSERT INTO budgets (id, categoria_id, monto_cents) VALUES (?1,?2,?3)",
+                rusqlite::params![ji(&b["id"]), ji(&b["categoria_id"]), ji(&b["monto_cents"])],
+            )
+            .map_err(|e| format!("presupuestos: {e}"))?;
+        }
+        for s in &settings {
+            let k = js(&s["clave"]);
+            if k.is_empty() || k == "ai_key" || k == "pin_hash" || k == "pin_salt" {
+                continue;
+            }
+            conn.execute(
+                "INSERT INTO settings (clave, valor) VALUES (?1, ?2) ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
+                rusqlite::params![k, js(&s["valor"])],
+            )
+            .map_err(|e| format!("ajustes: {e}"))?;
+        }
+        for t in [
+            "payments",
+            "debts",
+            "debt_payments",
+            "contacts",
+            "reminders",
+            "categories",
+            "budgets",
+        ] {
+            conn.execute_batch(&format!(
+                "UPDATE sqlite_sequence SET seq = COALESCE((SELECT MAX(id) FROM {t}), seq) WHERE name = '{t}'"
+            ))
+            .map_err(|e| format!("secuencia: {e}"))?;
+        }
+        Ok(format!(
+            "{} pagos, {} deudas, {} avisos",
+            pays.len(),
+            debts.len(),
+            rems.len()
+        ))
+    })();
+    match r {
+        Ok(msg) => {
+            conn.execute_batch("COMMIT")
+                .map_err(|e| format!("restore: {e}"))?;
+            Ok(msg)
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
 }

@@ -272,6 +272,30 @@ export function writeTextFile(path: string, content: string): Promise<void> {
   return invoke<void>("write_text_file", { path, content });
 }
 
+/** Lee un archivo de texto (solo app instalada; en web se usa <input file>). */
+export function readTextFile(path: string): Promise<string> {
+  if (isPreview())
+    return Promise.reject(new Error("solo en la app instalada"));
+  return invoke<string>("read_text_file", { path });
+}
+
+// ── Respaldo portable M3 (PC↔iPhone) ──
+
+/** Volcado completo JSON (sin clave IA ni PIN). */
+export async function exportarRespaldo(
+  stamp: string,
+): Promise<{ nombre: string; json: string }> {
+  if (isPreview()) return mock.exportarRespaldoWeb(stamp);
+  const json = await invoke<string>("exportar_respaldo", { stamp });
+  return { nombre: `remindpay-${stamp}.json`, json };
+}
+
+/** Restaura un volcado (reemplazo total). Devuelve resumen. */
+export function importarRespaldo(json: string): Promise<string> {
+  if (isPreview()) return mock.importarRespaldoWeb(json);
+  return invoke<string>("importar_respaldo", { json });
+}
+
 // ── Comprobantes, recurrentes, presupuestos ──
 
 export function guardarComprobante(

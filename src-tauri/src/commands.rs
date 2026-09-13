@@ -416,6 +416,41 @@ pub fn write_text_file(path: String, content: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+pub fn read_text_file(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path).map_err(|e| format!("leer: {e}"))
+}
+
+// ── Respaldo portable M3 (exportar/importar PC↔iPhone) ──
+
+#[tauri::command]
+pub fn exportar_respaldo(
+    state: State<'_, Mutex<Connection>>,
+    stamp: String,
+) -> Result<String, String> {
+    if stamp.len() > 32
+        || !stamp
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        return Err("marca inválida".into());
+    }
+    let conn = state.lock().map_err(|e| format!("db bloqueada: {e}"))?;
+    db::dump_respaldo(&conn, &stamp)
+}
+
+#[tauri::command]
+pub fn importar_respaldo(
+    state: State<'_, Mutex<Connection>>,
+    json: String,
+) -> Result<String, String> {
+    if json.len() > 50_000_000 {
+        return Err("respaldo demasiado grande".into());
+    }
+    let conn = state.lock().map_err(|e| format!("db bloqueada: {e}"))?;
+    db::restore_respaldo(&conn, &json)
+}
+
 // ── Comprobantes, recurrentes, presupuestos ──
 
 fn nombre_seguro(nombre: &str) -> String {
