@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   createBackup,
+  esMovil,
   exportarRespaldo,
   getDataDir,
   getSetting,
@@ -379,12 +380,14 @@ export default function Config() {
               Iniciar con Windows
               <span className="block text-xs text-zinc-500">
                 Revisa tus avisos automáticamente
-                {isPreview() ? " (solo en la app instalada)" : ""}
+                {isPreview() || esMovil() ? " (solo en la app de PC)" : ""}
               </span>
             </p>
             <Toggle
               on={auto}
-              onClick={() => void toggleAuto()}
+              onClick={() => {
+                if (!esMovil()) void toggleAuto();
+              }}
               label="Iniciar con Windows"
             />
           </div>
@@ -650,7 +653,7 @@ export default function Config() {
         )}
 
         <div className="flex items-center gap-3 px-1 py-2 text-xs text-zinc-600">
-          <span>RemindPay 0.9.0 · 100% local · SQLite · USD</span>
+          <span>RemindPay 0.10.0 · 100% local · SQLite · USD</span>
         </div>
       </div>
     </div>

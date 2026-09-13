@@ -14,6 +14,7 @@ import { Icon, Logo } from "./components/ui";
 import {
   createBackup,
   dueReminders,
+  esMovil,
   generarRecurrentes,
   getSetting,
   isPinSet,
@@ -363,7 +364,7 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col bg-zinc-950 text-zinc-50">
-      {!isPreview() && <Titlebar />}
+      {!isPreview() && !esMovil() && <Titlebar />}
       <div className="flex min-h-0 flex-1">
       {/* Sidebar (solo escritorio) */}
       <aside className="hidden w-64 shrink-0 flex-col border-r border-zinc-800/80 bg-zinc-900/30 md:flex">

@@ -23,9 +23,17 @@ import type {
   Reminder,
 } from "./types";
 
-/** true cuando corre en navegador sin backend Rust (vista previa). */
+/** true cuando corre en navegador sin backend Rust (vista previa / PWA). */
 export function isPreview(): boolean {
   return typeof window !== "undefined" && !("__TAURI_INTERNALS__" in window);
+}
+
+/** true en iPhone/iPad/Android (navegador o app instalada). */
+export function esMovil(): boolean {
+  return (
+    typeof navigator !== "undefined" &&
+    /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+  );
 }
 
 /** Prueba del puente JS → Rust. */

@@ -1,0 +1,59 @@
+# RemindPay — build iOS sin firmar (para instalar con Ksign).
+# Se ejecuta a mano (Actions → Run workflow): compila en macOS y deja el
+# .ipa como artefacto. OJO: macOS consume minutos 10x en la cuota gratis.
+name: iOS (ipa sin firmar)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - name: Dependencias web
+        run: npm ci
+
+      - name: Proyecto Xcode (tauri ios init)
+        run: npx tauri ios init
+
+      - name: Compilar sin firmar
+        run: |
+          PROJ=$(ls -d src-tauri/gen/apple/*.xcodeproj | head -n 1)
+          echo "Proyecto: $PROJ"
+          xcodebuild -list -project "$PROJ"
+          SCHEME=$(xcodebuild -list -project "$PROJ" | grep -oE '[A-Za-z0-9_]+_iOS' | head -n 1)
+          echo "Scheme: $SCHEME"
+          xcodebuild -project "$PROJ" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Empaquetar .ipa
+        run: |
+          APP=$(find ~/Library/Developer/Xcode/DerivedData -name "*.app" -path "*Release-iphoneos*" | head -n 1)
+          echo "App: $APP"
+          rm -rf Payload RemindPay-unsigned.ipa
+          mkdir Payload
+          cp -R "$APP" Payload/
+          zip -r -y RemindPay-unsigned.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RemindPay-unsigned-ipa
+          path: RemindPay-unsigned.ipa
