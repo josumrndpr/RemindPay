@@ -50,6 +50,7 @@ Sidebar: Dashboard / Pagos / Deudas / Recordatorios / Contactos / Config. PIN ga
 - [x] **0.8.0 (M2 iPhone)** — Persistencia real en iPhone: backend web en IndexedDB (mismas reglas que Rust: centavos, pagado/pendiente, abonos con tope, vencidas, recurrentes, presupuestos, PIN con hash, respaldos JSON, comprobantes blob). Aura en iPhone vía proxy propio opcional (`extras/aura-proxy-worker.js`, Cloudflare Worker gratis, clave en servidor).
 - [x] **0.9.0 (M3 sync manual)** — Respaldo portable PC↔iPhone: exportar todo a JSON (PC: elige carpeta; iPhone: descarga/comparte) + importar con confirmación y reemplazo total en transacción (rollback si falla). Sin clave IA ni PIN. Test Rust ida-y-vuelta.
 - [x] **0.10.0 (prep iOS nativa)** — Puerta iOS en Rust (bandeja/autostart/instancia única solo escritorio vía `cfg(desktop)`) + `esMovil()` (Titlebar y autostart solo PC) + workflow CI (`.github/workflows/ios.yml`) que compila `.ipa` sin firmar para Ksign. Sin cambios visibles en PC.
+- [x] **0.10.1** — Fix CI iOS: usar `tauri ios build --no-sign` en vez de xcodebuild directo (el CLI levanta el servidor de opciones que el build-phase exige y genera el `.ipa` solo).
 
 ## Requisito de máquina (Windows)
 Para `tauri dev` / `tauri build` hace falta VS 2022 con workload **"Desarrollo para el escritorio con C++"** + WebView2 (ya lo tienes). Sin eso: `npm run dev` (solo web) y `cargo check` sí funcionan. Instálalo desde Visual Studio Installer → Modificar → marcar C++ → Instalar (~6GB).
